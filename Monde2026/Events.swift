@@ -116,7 +116,7 @@ extension Simulation {
 
 enum EventCatalog {
 
-    static let all: [EventDefinition] = national + worldwide
+    static let all: [EventDefinition] = national + worldwide + extra
 
     // MARK: Événements nationaux
 

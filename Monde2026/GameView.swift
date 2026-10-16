@@ -239,12 +239,13 @@ struct Dock: View {
             item("Armée", "shield.lefthalf.filled", .military)
             item("Industrie", "gearshape.2", .production)
             item("Recherche", "atom", .research)
+            item("Projets", "hammer", .projects)
             item("Diplomatie", "envelope", .diplomacy, badge: inboxCount)
             item("Monde", "globe.americas", .world)
         }
         .padding(4)
         .glass(26)
-        .frame(maxWidth: 640)
+        .frame(maxWidth: 700)
     }
 
     private var inboxCount: Int {
@@ -294,6 +295,7 @@ struct PanelHost: View {
                 case .country(let id): CountryPanel(store: store, id: id)
                 case .politics: PoliticsPanel(store: store)
                 case .research: ResearchPanel(store: store)
+                case .projects: ProjectsPanel(store: store)
                 case .event(let eventID): EventPanel(store: store, eventID: eventID)
                 case .endGame: EndGamePanel(store: store)
                 }

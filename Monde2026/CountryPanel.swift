@@ -25,6 +25,8 @@ struct CountryPanel: View {
             if let p = store.playerID, p != id, !(sim.state.countries[p]?.capitulated ?? false) {
                 DiplomaticActions(store: store, sim: sim, player: p, target: id)
                 WarActions(store: store, sim: sim, player: p, target: id)
+                CovertOpsCard(store: store, sim: sim, player: p, target: id)
+                UNCard(store: store, sim: sim, player: p, target: id)
             }
         }
     }

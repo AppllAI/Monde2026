@@ -369,3 +369,4 @@ with open(REPORT, "w", encoding="utf-8") as fh:
     for c in sorted(by):
         fh.write(f"{c} ({len(by[c])}) : " + " | ".join(sorted(by[c])) + "\n")
 print(open(REPORT, encoding="utf-8").read()[:3000])
+# version 0.8 : petits États jouables

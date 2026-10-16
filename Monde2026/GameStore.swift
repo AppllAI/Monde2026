@@ -8,7 +8,7 @@ import MapKit
 // =============================================================
 
 enum Panel: Identifiable, Hashable {
-    case economy, military, production, diplomacy, world, politics, research, endGame
+    case economy, military, production, diplomacy, world, politics, research, endGame, projects
     case country(CountryID)
     case event(Int)
 
@@ -21,6 +21,7 @@ enum Panel: Identifiable, Hashable {
         case .world: return "world"
         case .politics: return "politics"
         case .research: return "research"
+        case .projects: return "projects"
         case .endGame: return "endGame"
         case .country(let c): return "country-" + c
         case .event(let e): return "event-\(e)"
@@ -135,6 +136,9 @@ final class GameStore: ObservableObject {
         }
         collectEvents()
         presentUrgent()
+        if let unlocked = sim?.state.achievements, !unlocked.isEmpty {
+            AchievementStore.merge(unlocked)
+        }
     }
 
     /// Ouvre automatiquement un événement à choix ou l'écran de fin.

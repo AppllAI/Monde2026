@@ -83,6 +83,7 @@ struct EndGamePanel: View {
                     }
                 }
             }
+            AchievementsCard(unlockedHere: sim.state.achievements)
             if record.gameOver {
                 ActionButton(title: "Continuer à jouer", icon: "play.fill") { store.acknowledgeEnd() }
                 QuietButton(title: "Retour au menu", icon: "house", tint: Theme.coral) { store.quitToMenu() }

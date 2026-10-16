@@ -10,6 +10,7 @@ struct Glass: ViewModifier {
     var radius: CGFloat = 20
     func body(content: Content) -> some View {
         content
+            .background(Theme.ink.opacity(0.74), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.line))
     }

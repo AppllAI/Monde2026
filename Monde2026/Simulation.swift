@@ -51,6 +51,8 @@ struct GameState: Codable {
     var record: PlayerRecord?
     var pendingEvents: [PendingEvent]
     var nextPendingEventID: Int
+    var achievements: Set<String>
+    var firedNews: Set<String>
 }
 
 struct Simulation {
@@ -96,7 +98,8 @@ struct Simulation {
                           events: [], nextEventID: 1, initialWorldGDP: 1,
                           relations: [:], relationMemory: [:], treaties: [], nextTreatyID: 1, blocs: [],
                           claims: [], warPlans: [], proposals: [], nextProposalID: 1, worldTension: 0,
-                          difficulty: difficulty, record: nil, pendingEvents: [], nextPendingEventID: 1)
+                          difficulty: difficulty, record: nil, pendingEvents: [], nextPendingEventID: 1,
+                          achievements: [], firedNews: [])
         for r in Resource.allCases {
             state.prices[r] = 1
         }
@@ -130,6 +133,7 @@ struct Simulation {
         state.day += 1
         dailyMilitary()
         dailyWar()
+        scheduledNews()
         if Simulation.calendar.component(.day, from: currentDate) == 1 {
             monthlyTick()
         }
@@ -148,6 +152,7 @@ struct Simulation {
             monthlyEconomy(id)
             monthlyPolitics(id)
             monthlyResearch(id)
+            monthlyProjects(id)
         }
         monthlyDiplomacy()
         for id in countryIDs {
@@ -164,6 +169,7 @@ struct Simulation {
         monthlyEvents()
         aiNuclearDecisions()
         monthlyGoals()
+        monthlyAchievements()
     }
 
     mutating func recordSnapshot(_ id: CountryID) {

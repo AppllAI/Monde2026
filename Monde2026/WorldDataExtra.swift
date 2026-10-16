@@ -2,7 +2,7 @@ import Foundation
 
 // =============================================================
 //  WorldDataExtra.swift
-//  85 pays supplémentaires (Caucase, Balkans, Baltes, Afrique,
+//  99 pays supplémentaires (Caucase, Balkans, Baltes, Afrique,
 //  Amérique centrale, Asie centrale…). Même format que WorldData.
 //  Chiffres arrondis 2024-2025, à affiner librement.
 // =============================================================
@@ -96,7 +96,11 @@ enum WorldDataExtra {
         ("BOL", "CHL"), ("PRY", "BRA"), ("PRY", "ARG"), ("URY", "BRA"), ("URY", "ARG"), ("GTM", "MEX"),
         ("GTM", "HND"), ("GTM", "SLV"), ("HND", "SLV"), ("HND", "NIC"), ("NIC", "CRI"), ("CRI", "PAN"),
         ("PAN", "COL"), ("DOM", "HTI"), ("GUY", "VEN"), ("GUY", "BRA"), ("GUY", "SUR"), ("SUR", "BRA"),
-        ("SUR", "FRA"), ("BRA", "FRA")
+        ("SUR", "FRA"), ("BRA", "FRA"),
+        // Petits États
+        ("LBR", "SLE"), ("LBR", "GIN"), ("LBR", "CIV"), ("SLE", "GIN"), ("GMB", "SEN"), ("GNB", "SEN"), ("GNB", "GIN"),
+        ("GNQ", "CMR"), ("GNQ", "GAB"), ("LSO", "ZAF"), ("SWZ", "ZAF"), ("SWZ", "MOZ"), ("BTN", "IND"), ("BTN", "CHN"),
+        ("BRN", "MYS"), ("TLS", "IDN"), ("BLZ", "MEX"), ("BLZ", "GTM")
     ]
 
     // MARK: - Les pays
@@ -455,6 +459,55 @@ enum WorldDataExtra {
         list.append(W.c("FJI", "Fidji", .oceania, pop: 0.93, area: 18.3, gdp: 6, growth: 3.0, debt: 80,
                         revenue: 25, mil: 1.4, industry: 15, tech: 0.3, cost: 0.35,
                         army: (4, 6, 0, 20, 10), air: 0, navy: (0, 0, 0)))
+
+        // Petits États ajoutés en version 0.8
+        list.append(W.c("LBR", "Liberia", .subSaharanAfrica, pop: 5.6, area: 111, gdp: 4.8, growth: 4.5, debt: 55,
+                        revenue: 18, mil: 0.6, industry: 15, tech: 0.15, cost: 0.15,
+                        army: (8, 0, 0, 20, 10), air: 0, navy: (0, 0, 0),
+                        res: [.criticalMinerals: 0.1, .food: 0.05]))
+        list.append(W.c("SLE", "Sierra Leone", .subSaharanAfrica, pop: 8.9, area: 72, gdp: 7.4, growth: 4.0, debt: 90,
+                        revenue: 15, mil: 0.8, industry: 15, tech: 0.15, cost: 0.15,
+                        army: (9, 0, 0, 30, 10), air: 0, navy: (0, 0, 0),
+                        res: [.criticalMinerals: 0.1, .food: 0.05]))
+        list.append(W.c("GMB", "Gambie", .subSaharanAfrica, pop: 2.8, area: 11.3, gdp: 2.6, growth: 5.0, debt: 75,
+                        revenue: 18, mil: 0.7, industry: 12, tech: 0.15, cost: 0.15,
+                        army: (2, 0, 0, 10, 0), air: 0, navy: (0, 0, 0)))
+        list.append(W.c("GNB", "Guinée-Bissau", .subSaharanAfrica, pop: 2.2, area: 36, gdp: 2.2, growth: 4.5, debt: 75,
+                        revenue: 14, mil: 1.5, industry: 12, tech: 0.1, cost: 0.15,
+                        army: (4.5, 0, 10, 30, 20), air: 0, navy: (0, 0, 0)))
+        list.append(W.c("GNQ", "Guinée équatoriale", .subSaharanAfrica, pop: 1.9, area: 28, gdp: 12.5, growth: -2.0, debt: 40,
+                        revenue: 18, mil: 1.2, industry: 50, tech: 0.25, cost: 0.3,
+                        army: (2, 0, 3, 30, 10), air: 0, navy: (0, 0, 0),
+                        res: [.oil: 0.15, .gas: 0.3]))
+        list.append(W.c("LSO", "Lesotho", .subSaharanAfrica, pop: 2.3, area: 30, gdp: 2.3, growth: 2.0, debt: 60,
+                        revenue: 45, mil: 1.7, industry: 30, tech: 0.2, cost: 0.2,
+                        army: (2, 0, 0, 20, 5), air: 0, navy: (0, 0, 0)))
+        list.append(W.c("SWZ", "Eswatini", .subSaharanAfrica, pop: 1.2, area: 17.4, gdp: 4.8, growth: 4.0, debt: 40,
+                        revenue: 28, mil: 1.6, industry: 30, tech: 0.25, cost: 0.3,
+                        army: (3, 0, 0, 10, 5), air: 0, navy: (0, 0, 0)))
+        list.append(W.c("BTN", "Bhoutan", .southAsia, pop: 0.79, area: 38.4, gdp: 3.0, growth: 6.0, debt: 115,
+                        revenue: 25, mil: 0.0, industry: 35, tech: 0.25, cost: 0.25,
+                        army: (8, 0, 0, 0, 0), air: 0, navy: (0, 0, 0)))
+        list.append(W.c("BRN", "Brunei", .southeastAsia, pop: 0.46, area: 5.8, gdp: 15.5, growth: 2.0, debt: 3,
+                        revenue: 25, mil: 3.0, industry: 60, tech: 0.55, cost: 0.6,
+                        army: (7, 1, 0, 40, 20), air: 0, navy: (4, 0, 0),
+                        res: [.oil: 0.15, .gas: 0.3]))
+        list.append(W.c("TLS", "Timor oriental", .southeastAsia, pop: 1.4, area: 14.9, gdp: 2.0, growth: 3.0, debt: 15,
+                        revenue: 60, mil: 1.0, industry: 15, tech: 0.1, cost: 0.2,
+                        army: (2, 0, 0, 0, 0), air: 0, navy: (0, 0, 0)))
+        list.append(W.c("BLZ", "Belize", .latinAmerica, pop: 0.42, area: 23, gdp: 3.3, growth: 3.0, debt: 60,
+                        revenue: 28, mil: 1.2, industry: 15, tech: 0.3, cost: 0.4,
+                        army: (1.5, 0, 0, 0, 0), air: 0, navy: (0, 0, 0)))
+        list.append(W.c("TTO", "Trinité-et-Tobago", .latinAmerica, pop: 1.5, area: 5.1, gdp: 26, growth: 2.0, debt: 65,
+                        revenue: 26, mil: 0.7, industry: 45, tech: 0.45, cost: 0.5,
+                        army: (4, 0, 0, 10, 0), air: 0, navy: (2, 0, 0),
+                        res: [.oil: 0.1, .gas: 0.9]))
+        list.append(W.c("MLT", "Malte", .westernEurope, pop: 0.56, area: 0.32, gdp: 25, growth: 5.0, debt: 47,
+                        revenue: 36, mil: 0.5, industry: 10, tech: 0.75, cost: 0.7,
+                        army: (1.7, 0, 0, 20, 0), air: 0, navy: (0, 0, 0)))
+        list.append(W.c("BHS", "Bahamas", .latinAmerica, pop: 0.41, area: 13.9, gdp: 15, growth: 2.0, debt: 80,
+                        revenue: 22, mil: 0.7, industry: 10, tech: 0.45, cost: 0.6,
+                        army: (1.6, 0, 0, 0, 0), air: 0, navy: (0, 0, 0)))
 
         return list
     }

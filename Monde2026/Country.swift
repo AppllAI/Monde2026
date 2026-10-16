@@ -153,6 +153,11 @@ struct Country: Codable, Identifiable {
     var researchProgress: Double
     var posture: WarPosture
 
+    // MARK: Projets nationaux et renseignement
+    var activeProject: ActiveProject?
+    var completedProjects: Set<String>
+    var intelligence: Double             // 0…1 : services de renseignement
+
     // MARK: - Création depuis les données
 
     init(seed s: CountrySeed) {
@@ -294,6 +299,9 @@ struct Country: Codable, Identifiable {
         researching = nil
         researchProgress = 0
         posture = .balanced
+        activeProject = nil
+        completedProjects = []
+        intelligence = (0.25 + 0.5 * s.tech).clamped(0.1, 0.9)
     }
 
     var flag: String { Geo.flag(id) }

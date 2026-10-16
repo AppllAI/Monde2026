@@ -320,7 +320,7 @@ struct WorldMapView: UIViewRepresentable, Equatable {
                 config.showsTraffic = false
                 map.preferredConfiguration = config
             }
-            coordinator.renderer?.fillAlpha = satellite ? 0.55 : 0.94
+            coordinator.renderer?.fillAlpha = satellite ? 0.55 : 1.0
             coordinator.renderer?.setNeedsDisplay()
         }
         if let focus = focus, focus.id != coordinator.lastFocusID {
@@ -342,7 +342,7 @@ final class ProvinceOverlay: NSObject, MKOverlay {
 final class ProvinceRenderer: MKOverlayRenderer {
     private let lock = NSLock()
     private var snapshot = MapSnapshot.empty
-    var fillAlpha: CGFloat = 0.94
+    var fillAlpha: CGFloat = 1.0
 
     func update(_ newSnapshot: MapSnapshot) {
         lock.lock()
@@ -549,7 +549,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate {
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         if let overlay = overlay as? ProvinceOverlay {
             let r = ProvinceRenderer(overlay: overlay)
-            r.fillAlpha = satellite ? 0.55 : 0.94
+            r.fillAlpha = satellite ? 0.55 : 1.0
             if let snapshot = lastSnapshot { r.update(snapshot) }
             renderer = r
             return r
