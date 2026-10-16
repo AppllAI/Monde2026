@@ -313,8 +313,9 @@ extension Simulation {
             }
             return (path.reversed(), false)
         }
-        // Débarquement ou transport maritime.
-        guard let me = state.countries[owner], me.navalPower > 0 else { return nil }
+        // Débarquement ou transport maritime : seulement d'une côte à une autre.
+        guard let me = state.countries[owner], me.navalPower > 0,
+              ProvinceMap.all[target].coastal, ProvinceMap.all[army.province].coastal else { return nil }
         let destOwner = controller(of: target)
         if foes.contains(destOwner) {
             guard navalShare(owner, vs: destOwner) >= 0.55, distanceKm(army.province, target) < 3500 else { return nil }
@@ -748,8 +749,10 @@ extension Simulation {
     /// Le commandement automatique : renforcer le front, attaquer là où l'on est nettement plus fort.
     private mutating func commandArmies(_ id: CountryID) {
         guard let c = state.countries[id] else { return }
-        if armies(of: id).reduce(0, { $0 + $1.count }) < Int(Double(c.divisionCount) * 0.6) {
-            deployDefaultArmies(id, ratio: 0.8)
+        // Posture défensive : davantage de divisions en garnison, réparties sur tout le front.
+        let ratio = c.posture == .defensive ? 0.6 : 0.8
+        if armies(of: id).reduce(0, { $0 + $1.count }) < Int(Double(c.divisionCount) * (ratio - 0.2)) {
+            deployDefaultArmies(id, ratio: ratio)
         }
         let foes = enemies(of: id)
         guard !foes.isEmpty else { return }
@@ -768,10 +771,16 @@ extension Simulation {
             // Pas encore au front : y aller.
             if !front.contains(a.province) {
                 if front.isEmpty {
-                    // Guerre lointaine : débarquement si la flotte le permet.
-                    if a.organization > 0.85, Double.random(in: 0...1, using: &state.rng) < 0.1,
-                       let target = nearestEnemyProvince(from: a.province, owner: id),
-                       let r = route(for: a, to: target) {
+                    // Guerre lointaine : rejoindre une côte, puis débarquer si la flotte le permet.
+                    if !ProvinceMap.all[a.province].coastal {
+                        let coasts = provincesControlled(by: id).filter { ProvinceMap.all[$0].coastal }
+                        if let port = coasts.min(by: { distanceKm(a.province, $0) < distanceKm(a.province, $1) }),
+                           let r = route(for: a, to: port), !r.amphibious {
+                            state.armies[i].path = r.path
+                        }
+                    } else if a.organization > 0.85, Double.random(in: 0...1, using: &state.rng) < 0.1,
+                              let target = nearestEnemyProvince(from: a.province, owner: id),
+                              let r = route(for: a, to: target) {
                         state.armies[i].path = r.path
                         state.armies[i].amphibious = r.amphibious
                     }
@@ -820,12 +829,42 @@ extension Simulation {
                 }
             }
         }
+        rebalanceDefense(id, front: front, foes: foes)
+    }
+
+    /// Défense : les armées au calme rejoignent les régions du front les plus menacées.
+    private mutating func rebalanceDefense(_ id: CountryID, front: Set<Int>, foes: Set<CountryID>) {
+        guard !front.isEmpty else { return }
+        let enemyArmies = state.armies.filter { foes.contains($0.owner) }
+        guard !enemyArmies.isEmpty else { return }
+        let controlled = provincesControlled(by: id).count
+        func threat(_ p: Int) -> Double {
+            let around = Set(ProvinceMap.all[p].neighbors)
+            return enemyArmies.filter { around.contains($0.province) }.reduce(0.0) { $0 + armyAttack($1, vsHardness: 0.3) }
+        }
+        func cover(_ p: Int) -> Double {
+            var total = garrisonDefense(id, at: p, frontier: front, controlledCount: controlled)
+            for a in state.armies where a.owner == id && (a.province == p || a.path.last == p) {
+                total += armyDefense(a, vsHardness: 0.3)
+            }
+            return max(total, 1)
+        }
+        var pressure: [Int: Double] = [:]
+        for p in front { pressure[p] = threat(p) / cover(p) }
+        for i in state.armies.indices where state.armies[i].owner == id && state.armies[i].path.isEmpty {
+            let here = state.armies[i].province
+            guard front.contains(here), (pressure[here] ?? 0) < 0.6 else { continue }
+            guard let (target, value) = pressure.max(by: { $0.value < $1.value }), value > 1.2, target != here,
+                  let r = route(for: state.armies[i], to: target), !r.amphibious, r.path.count <= 4 else { continue }
+            state.armies[i].path = r.path
+            pressure[target] = value * 0.5
+        }
     }
 
     private func nearestEnemyProvince(from province: Int, owner: CountryID) -> Int? {
         let foes = enemies(of: owner)
         var best: (Int, Double)?
-        for p in ProvinceMap.all where foes.contains(controller(of: p.id)) {
+        for p in ProvinceMap.all where p.coastal && foes.contains(controller(of: p.id)) {
             let d = distanceKm(province, p.id)
             if d < (best?.1 ?? .infinity) { best = (p.id, d) }
         }

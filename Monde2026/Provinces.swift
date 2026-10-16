@@ -25,6 +25,7 @@ struct Province: Identifiable {
     let bounds: MKMapRect
     let path: CGPath                // contour prêt à dessiner (coordonnées MapKit)
     let neighbors: [Int]
+    let coastal: Bool
 
     var weight: Double { max(areaKm2, 1) }
     var center: GeoPoint { label }
@@ -63,8 +64,8 @@ enum ProvinceMap {
 
     /// Ordre dans lequel un occupant prend les régions (les autres : les plus proches de lui d'abord).
     static let occupationOrder: [String: [String]] = [
-        "UKR|RUS": ["Crimée", "Crimea", "Sébastopol", "Sevastopol", "Louhansk", "Luhansk", "Donetsk", "Zaporijjia",
-                    "Zaporizhzhia", "Kherson"],
+        "UKR|RUS": ["Crimée", "Crimea", "Lougansk", "Louhansk", "Luhansk", "Donetsk", "Zaporijjia", "Zaporizhzhia",
+                    "Kherson"],
         "GEO|RUS": ["Ossétie du Sud", "Abkhazie", "Abkhazia", "Shida Kartli"],
         "MDA|RUS": ["Transnistrie", "Stînga Nistrului", "Transnistria"],
         "CYP|TUR": ["Chypre du Nord", "Northern Cyprus", "Lefkoşa", "Gazimağusa", "Girne", "Güzelyurt", "İskele"],
@@ -79,7 +80,8 @@ enum ProvinceMap {
             return ([], [])
         }
         var reader = BinaryReader(data: data)
-        guard reader.ascii(4) == "MAP2" else { return ([], []) }
+        let version = reader.ascii(4)
+        guard version == "MAP2" || version == "MAP3" else { return ([], []) }
         let count = Int(reader.u32())
         var provinces: [Province] = []
         provinces.reserveCapacity(count)
@@ -113,9 +115,10 @@ enum ProvinceMap {
             let nCount = Int(reader.u16())
             var neighbors: [Int] = []
             for _ in 0..<nCount { neighbors.append(Int(reader.u16())) }
+            let coastal = version == "MAP3" ? reader.u8() != 0 : true
             provinces.append(Province(id: id, country: code, countryName: countryName, name: name,
                                       label: GeoPoint(lat: lat, lon: lon), areaKm2: area, rings: rings,
-                                      bounds: bounds, path: path, neighbors: neighbors))
+                                      bounds: bounds, path: path, neighbors: neighbors, coastal: coastal))
         }
         var borders: [ProvinceBorder] = []
         let edgeCount = Int(reader.u32())
@@ -181,6 +184,11 @@ struct BinaryReader {
         let slice = data.subdata(in: (data.startIndex + offset)..<(data.startIndex + offset + n))
         offset += n
         return slice
+    }
+
+    mutating func u8() -> UInt8 {
+        guard let b = bytes(1) else { return 0 }
+        return b[b.startIndex]
     }
 
     mutating func u16() -> UInt16 {
@@ -313,16 +321,29 @@ extension Simulation {
         }
         let explicit = ProvinceMap.occupationOrder[victim + "|" + holder] ?? []
         let holderSet = Set(ProvinceMap.byCountry[holder] ?? [])
-        let holderCenters = (ProvinceMap.byCountry[holder] ?? []).map { ProvinceMap.all[$0].label }
+        // Distance en nombre de régions depuis la frontière de l'occupant (le front avance de proche en proche).
+        let candidateSet = Set(candidates.map { $0.id })
+        var steps: [Int: Int] = [:]
+        var queue: [Int] = []
+        for p in candidates where p.neighbors.contains(where: { holderSet.contains($0) }) {
+            steps[p.id] = 0
+            queue.append(p.id)
+        }
+        var head = 0
+        while head < queue.count {
+            let cur = queue[head]
+            head += 1
+            for n in ProvinceMap.all[cur].neighbors where candidateSet.contains(n) && steps[n] == nil {
+                steps[n] = (steps[cur] ?? 0) + 1
+                queue.append(n)
+            }
+        }
         func frontDistance(_ p: Province) -> Double {
             if let index = explicit.firstIndex(where: { p.name.localizedCaseInsensitiveContains($0) }) {
                 return Double(index) - 1_000_000
             }
-            // Une région frontalière de l'occupant passe avant les autres.
-            let bordering = p.neighbors.contains { holderSet.contains($0) }
-            let base = holderCenters.isEmpty ? ProvinceMap.distanceKm(p.label, capital)
-                : (holderCenters.map { ProvinceMap.distanceKm(p.label, $0) }.min() ?? 0)
-            return bordering ? base - 100_000 : base
+            if let s = steps[p.id] { return Double(s) * 10_000 + ProvinceMap.distanceKm(p.label, capital) * -1 }
+            return 1_000_000 + ProvinceMap.distanceKm(p.label, capital)
         }
         return candidates.sorted { frontDistance($0) < frontDistance($1) }
     }

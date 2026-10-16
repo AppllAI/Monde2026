@@ -8,7 +8,7 @@ Construit Resources/map.bin à partir de Natural Earth (domaine public).
 - Frontières partagées entre régions (pour dessiner frontières et lignes de front).
 
 Format binaire (petit-boutiste) :
-  "MAP2"
+  "MAP3"
   u32 nombre de régions
   pour chaque région :
      3 octets code pays, chaîne nom, chaîne nom du pays,
@@ -331,7 +331,7 @@ def label_point(geom):
 
 total_points = 0
 with open(OUT, "wb") as fh:
-    fh.write(b"MAP2")
+    fh.write(b"MAP3")
     fh.write(struct.pack("<I", len(final)))
     for i, f in enumerate(final):
         fh.write(f["code"].encode("ascii")[:3].ljust(3, b" "))
@@ -350,6 +350,14 @@ with open(OUT, "wb") as fh:
         fh.write(struct.pack("<H", len(nb)))
         for n in nb:
             fh.write(struct.pack("<H", n))
+        # Région côtière : une partie de sa frontière ne touche aucune autre région.
+        try:
+            others = unary_union([geoms[n] for n in nb]).buffer(0.03) if nb else None
+            free = f["geom"].boundary if others is None else f["geom"].boundary.difference(others)
+            coastal = free.length > 0.15
+        except Exception:
+            coastal = True
+        fh.write(struct.pack("<B", 1 if coastal else 0))
     fh.write(struct.pack("<I", len(edges)))
     for a, b, lines in edges:
         fh.write(struct.pack("<HHH", a, b, len(lines)))
