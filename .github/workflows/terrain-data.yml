@@ -1,0 +1,41 @@
+name: Données du terrain
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/build_terrain.py"
+      - ".github/workflows/terrain-data.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  terrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Télécharger Natural Earth (relief, fleuves, villes)
+        run: |
+          B=https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson
+          curl -sSL -o geo.geojson $B/ne_10m_geography_regions_polys.geojson
+          curl -sSL -o rivers.geojson $B/ne_10m_rivers_lake_centerlines.geojson
+          curl -sSL -o places.geojson $B/ne_10m_populated_places_simple.geojson
+          ls -la *.geojson
+
+      - name: Calculer le terrain de chaque région
+        run: |
+          pip install shapely==2.0.6
+          python3 tools/build_terrain.py Resources/map.bin geo.geojson rivers.geojson places.geojson Resources/terrain.json tools/terrain-report.txt
+
+      - name: Enregistrer dans le dépôt
+        run: |
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git add Resources/terrain.json tools/terrain-report.txt
+          git commit -m "Terrain généré depuis Natural Earth" || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
