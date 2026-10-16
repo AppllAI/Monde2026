@@ -385,6 +385,7 @@ struct RegionCard: View {
         case .occupied: return "Occupée par \(sim.name(owner.owner ?? "")) : la guerre décidera de son sort."
         case .annexed: return "Annexée par \(sim.name(owner.owner ?? ""))."
         case .rebel: return "Aux mains des rebelles."
+        case .neutral: return "Territoire neutre."
         }
     }
 }
