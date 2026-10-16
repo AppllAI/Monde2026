@@ -523,14 +523,16 @@ final class ProvinceRenderer: MKOverlayRenderer {
         }
         // 7. Pions d'armées (taille fixe à l'écran)
         let showAll = zoomScale > 1.0 / 32768
+        // Les tuiles sont dessinées en pixels (écran Retina) : on double la taille pour avoir de vrais points.
+        let unit = px * 2
         for m in snap.armies where m.isPlayer || m.selected || showAll {
-            let w = 50 * px, h = 24 * px
-            let cx = CGFloat(m.x) + CGFloat(m.slot) * 54 * px
+            let w = 50 * unit, h = 24 * unit
+            let cx = CGFloat(m.x) + CGFloat(m.slot) * 54 * unit
             let cy = CGFloat(m.y)
             let box = CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
             guard MKMapRect(x: Double(box.minX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
                 .intersects(mapRect) else { continue }
-            drawMarker(m, in: box, px: px, context: context)
+            drawMarker(m, in: box, px: unit, context: context)
         }
         UIGraphicsPopContext()
     }
