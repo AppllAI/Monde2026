@@ -3,6 +3,9 @@ name: Compilation iOS
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "tools/**"
+      - ".github/workflows/map-data.yml"
   workflow_dispatch:
 
 permissions:

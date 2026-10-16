@@ -1,0 +1,39 @@
+name: Données de la carte
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/build_map.py"
+      - ".github/workflows/map-data.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Télécharger Natural Earth (régions administratives)
+        run: |
+          curl -sSL -o admin1.geojson https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces.geojson
+          ls -la admin1.geojson
+
+      - name: Construire la carte
+        run: |
+          pip install shapely==2.0.6
+          mkdir -p Resources
+          python3 tools/build_map.py admin1.geojson Resources/map.bin tools/map-report.txt
+
+      - name: Enregistrer la carte dans le dépôt
+        run: |
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git add Resources/map.bin tools/map-report.txt
+          git commit -m "Carte générée depuis Natural Earth" || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
