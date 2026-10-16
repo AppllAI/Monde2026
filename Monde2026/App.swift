@@ -21,11 +21,29 @@ struct Monde2026App: App {
 struct RootView: View {
     @ObservedObject var store: GameStore
 
+    @State private var launched = false
+
     var body: some View {
-        if store.hasGame {
-            GameView(store: store)
-        } else {
-            StartView(store: store)
+        Group {
+            if store.hasGame {
+                GameView(store: store)
+            } else {
+                StartView(store: store)
+            }
+        }
+        .task {
+            // Options de test automatique (aucun effet en jeu normal).
+            guard !launched else { return }
+            launched = true
+            if LaunchOptions.selfTest {
+                await Task.detached(priority: .userInitiated) { SelfTest.run() }.value
+            }
+            if let id = LaunchOptions.autostart {
+                UserDefaults.standard.set(true, forKey: "tutorialSeen")
+                store.newGame(as: id)
+                store.speed = LaunchOptions.autoSpeed
+                store.autoPause = false
+            }
         }
     }
 }

@@ -36,7 +36,55 @@ jobs:
           cat status.txt
           cat errors.txt
 
+      - name: Lancer le jeu dans un simulateur d'iPad
+        if: always()
+        run: |
+          mkdir -p /tmp/out
+          if ! grep -q OK status.txt; then echo "pas de test : compilation échouée" > /tmp/out/run.txt; exit 0; fi
+          APP="build/Build/Products/Debug-iphonesimulator/Monde 2026.app"
+          BUNDLE=com.brrrr999.monde2026
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)['devices']
+          ipads = [x for k, v in d.items() if 'iOS' in k for x in v if 'iPad' in x['name']]
+          print(ipads[-1]['udid'] if ipads else '')")
+          echo "Simulateur : $UDID" | tee /tmp/out/run.txt
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+
+          # 1. Test du moteur : 5 ans de simulation
+          (xcrun simctl launch --console-pty "$UDID" $BUNDLE -selftest > selftest.log 2>&1 &)
+          for i in $(seq 1 120); do sleep 5; grep -q "SELFTEST FIN" selftest.log && break; done
+          grep -a "SELFTEST" selftest.log > /tmp/out/selftest.txt || true
+          tail -c 20000 selftest.log > /tmp/out/selftest-raw.txt
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+
+          # 2. Écran d'accueil
+          xcrun simctl launch "$UDID" $BUNDLE
+          sleep 8
+          xcrun simctl io "$UDID" screenshot /tmp/out/1-accueil.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+
+          # 3. Une partie en accéléré
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 3
+          sleep 15
+          xcrun simctl io "$UDID" screenshot /tmp/out/2-partie.png
+          sleep 45
+          xcrun simctl io "$UDID" screenshot /tmp/out/3-partie-1min.png
+          if xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE"; then
+            echo "Jeu toujours lancé après 1 minute : OK" | tee -a /tmp/out/run.txt
+          else
+            echo "Le jeu s'est fermé (crash ?)" | tee -a /tmp/out/run.txt
+          fi
+          ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i monde | head -3 | while read f; do
+            head -c 15000 ~/Library/Logs/DiagnosticReports/"$f" > /tmp/out/crash-"$f".txt
+          done
+
       - name: Publier le résultat dans la branche ci-results
+        if: always()
         run: |
           mkdir -p /tmp/out
           cp status.txt errors.txt /tmp/out/
@@ -46,8 +94,10 @@ jobs:
           git config user.email "ci-bot@users.noreply.github.com"
           git checkout --orphan ci-results
           git rm -rf . > /dev/null
+          rm -rf build Monde2026.xcodeproj Monde2026 status.txt errors.txt build.log selftest.log
           cp /tmp/out/* .
-          git add status.txt errors.txt commit.txt build-tail.log
+          git add -A .
+          git reset -q -- build Monde2026.xcodeproj 2>/dev/null || true
           git commit -m "Résultat de compilation ${GITHUB_SHA}"
           git push -f origin ci-results
 

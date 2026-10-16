@@ -1,0 +1,68 @@
+import Foundation
+
+// =============================================================
+//  SelfTest.swift
+//  Outils de test automatique (utilisés par la compilation sur
+//  GitHub, sans effet en jeu normal) :
+//   -selftest      fait tourner le monde 5 ans et affiche un bilan
+//   -autostart FRA lance directement une partie avec ce pays
+// =============================================================
+
+enum LaunchOptions {
+    static var arguments: [String] { ProcessInfo.processInfo.arguments }
+
+    static var selfTest: Bool { arguments.contains("-selftest") }
+
+    static var autostart: CountryID? {
+        guard let i = arguments.firstIndex(of: "-autostart"), i + 1 < arguments.count else { return nil }
+        return arguments[i + 1]
+    }
+
+    static var autoSpeed: Int {
+        guard let i = arguments.firstIndex(of: "-speed"), i + 1 < arguments.count else { return 0 }
+        return Int(arguments[i + 1]) ?? 0
+    }
+}
+
+enum SelfTest {
+
+    static func run() {
+        func log(_ text: String) {
+            print("SELFTEST " + text)
+        }
+        let start = Date()
+        var sim = Simulation(playerID: "FRA", difficulty: .normal)
+        log("init \(String(format: "%.2f", Date().timeIntervalSince(start))) s, \(sim.state.countries.count) pays, \(ProvinceMap.all.count) régions")
+        let owners = sim.provinceOwners()
+        log("régions attribuées : \(owners.count)")
+        let bad = ProvinceMap.all.filter { $0.outline.count < 3 }.count
+        log("régions sans contour : \(bad)")
+
+        let watched: [CountryID] = ["USA", "CHN", "FRA", "DEU", "RUS", "UKR", "IND", "BRA", "ARM", "SDN"]
+        for year in 1...5 {
+            let t = Date()
+            sim.advance(days: 365)
+            log("— année \(2025 + year + 1) : \(String(format: "%.2f", Date().timeIntervalSince(t))) s de calcul")
+            for id in watched {
+                guard let c = sim.state.countries[id] else { continue }
+                let gdp = sim.effectiveGDP(id)
+                log("\(id) PIB \(Int(gdp)) Md$ croiss \(String(format: "%.1f", c.growth * 100))% dette \(Int(c.debt / gdp * 100))% infl \(String(format: "%.1f", c.inflation * 100))% stab \(Int(c.stability * 100)) div \(c.divisionCount) perdu \(Int(sim.lostFraction(id) * 100))%")
+            }
+            log("guerres : " + sim.activeWarsList.map { $0.name }.joined(separator: " | "))
+            log("tension \(Int(sim.state.worldTension)), plans de guerre \(sim.state.warPlans.count), prix pétrole \(String(format: "%.2f", sim.state.prices[.oil] ?? 1))")
+        }
+        let suspicious = sim.state.countries.values.filter { c in
+            let g = sim.effectiveGDP(c.id)
+            return !g.isFinite || g <= 0 || !c.debt.isFinite || !c.inflation.isFinite || c.inflation > 2 || c.growth < -0.25
+        }
+        log("pays aux chiffres suspects : " + suspicious.map { $0.id }.sorted().joined(separator: ", "))
+        let events = sim.state.events.suffix(40).map { $0.text }
+        for e in events { log("évènement : " + e) }
+        if let data = try? sim.saveData() {
+            log("sauvegarde : \(data.count / 1024) ko")
+            if (try? Simulation(saveData: data)) != nil { log("rechargement OK") } else { log("rechargement ECHEC") }
+        }
+        log("total \(String(format: "%.1f", Date().timeIntervalSince(start))) s")
+        log("FIN")
+    }
+}
