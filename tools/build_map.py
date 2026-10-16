@@ -56,8 +56,49 @@ ALIAS = {
 }
 SKIP = {"ATA"}
 
+# Régions rattachées de jure à un autre État que dans les données (le jeu gère l'occupation lui-même).
+DE_JURE = {"crimea": "UKR", "sevastopol": "UKR", "sébastopol": "UKR", "krym": "UKR"}
+
+# Régions qui ne doivent jamais être fusionnées (lieux clés de conflits).
+PROTECTED = ["crimea", "crimée", "krym", "donetsk", "luhansk", "lugansk", "lougansk", "zaporizh", "zaporij", "kherson",
+             "abkhaz", "nistr", "transnistr", "northern cyprus", "chypre du nord", "taiwan", "kashmir", "cachemire",
+             "golan", "quneitra", "kosovo"]
+
+NEUTRAL_FR = {
+    "AND": "Andorre", "ATG": "Antigua-et-Barbuda", "BHS": "Bahamas", "BLZ": "Belize", "BRB": "Barbade",
+    "BRN": "Brunei", "BTN": "Bhoutan", "COM": "Comores", "CPV": "Cap-Vert", "DMA": "Dominique",
+    "FSM": "Micronésie", "GMB": "Gambie", "GNB": "Guinée-Bissau", "GNQ": "Guinée équatoriale", "GRD": "Grenade",
+    "KIR": "Kiribati", "KNA": "Saint-Christophe", "LBR": "Liberia", "LCA": "Sainte-Lucie", "LIE": "Liechtenstein",
+    "LSO": "Lesotho", "MCO": "Monaco", "MDV": "Maldives", "MHL": "Îles Marshall", "MLT": "Malte", "MUS": "Maurice",
+    "NRU": "Nauru", "PLW": "Palaos", "PSX": "Palestine", "SAH": "Sahara occidental", "SLB": "Îles Salomon",
+    "SLE": "Sierra Leone", "SMR": "Saint-Marin", "STP": "Sao Tomé-et-Principe", "SWZ": "Eswatini",
+    "SYC": "Seychelles", "TLS": "Timor oriental", "TON": "Tonga", "TTO": "Trinité-et-Tobago", "TUV": "Tuvalu",
+    "VAT": "Vatican", "VCT": "Saint-Vincent", "VUT": "Vanuatu", "WSM": "Samoa", "PCN": "Pitcairn",
+    "ATC": "Ashmore-et-Cartier",
+}
+
+PREFIXES = ["oblast de ", "oblast d'", "kraï de ", "kraï du ", "république de ", "république des ", "république du ",
+            "république d'", "province de ", "province du ", "province d'", "région de ", "région du ", "région d'",
+            "gouvernorat de ", "gouvernorat d'", "état de ", "état du ", "état d'", "de la ", "de l'", "du ", "des ", "de ",
+            "d'", "l'", "la ", "le "]
+
+def clean(name):
+    n = name.strip()
+    changed = True
+    while changed:
+        changed = False
+        for pre in PREFIXES:
+            if n.lower().startswith(pre) and len(n) > len(pre) + 2:
+                n = n[len(pre):]
+                changed = True
+    return n[:1].upper() + n[1:] if n else name
+
 def code_for(props):
     a3 = props.get("adm0_a3") or props.get("ADM0_A3") or ""
+    raw = " ".join(str(props.get(k) or "") for k in ("name", "name_en", "name_fr")).lower()
+    for key, target in DE_JURE.items():
+        if key in raw and target in game:
+            return target
     if a3 in SKIP:
         return None
     if a3 in game:
@@ -70,7 +111,7 @@ def name_for(props):
     for key in ("name_fr", "name", "name_en", "gn_name"):
         v = props.get(key)
         if v:
-            return v.strip()
+            return clean(v)
     return "?"
 
 # ----------------------------------------------------------------- lecture
@@ -92,10 +133,18 @@ for f in data["features"]:
         g = g.buffer(0)
     lat = g.centroid.y
     area = g.area * (111.32 ** 2) * max(0.05, math.cos(math.radians(lat)))
-    units[code].append({"geom": g, "name": name_for(p), "region": (p.get("region") or "").strip(),
-                        "area": area})
+    a3 = p.get("adm0_a3") or ""
+    region = (p.get("region") or "").strip()
+    name = name_for(p)
+    if a3 in ALIAS and ALIAS[a3] == code:
+        # Territoire rattaché (Hong Kong, Groenland…) : une seule région à son nom.
+        region = "__" + a3
+        name = p.get("admin") or name
+    raw = " ".join(str(p.get(k) or "") for k in ("name", "name_en", "name_fr")).lower()
+    protected = any(k in raw for k in PROTECTED)
+    units[code].append({"geom": g, "name": name, "region": region, "area": area, "protected": protected})
     if code not in country_names:
-        country_names[code] = (p.get("admin") or code)
+        country_names[code] = NEUTRAL_FR.get(code) or (p.get("admin") or code)
 print("pays trouvés :", len(units))
 
 # ----------------------------------------------------------------- regroupement
@@ -103,8 +152,9 @@ def target_count(code, total_area, n_units):
     if code not in game:
         return 1
     t = round(math.sqrt(total_area) / 40)
-    special = {"USA": 49, "RUS": 60, "CHN": 34, "IND": 32, "UKR": 22, "BRA": 27, "DEU": 16, "FRA": 18,
-               "GBR": 12, "JPN": 16, "ITA": 15, "ESP": 15, "TUR": 20, "IRN": 18, "MEX": 24, "IDN": 22}
+    special = {"USA": 52, "RUS": 62, "CHN": 36, "IND": 32, "UKR": 25, "BRA": 27, "DEU": 16, "FRA": 18,
+               "GBR": 14, "JPN": 16, "ITA": 20, "ESP": 17, "TUR": 20, "IRN": 18, "MEX": 26, "IDN": 22,
+               "AUS": 10, "CAN": 14, "DNK": 4, "NLD": 6}
     t = special.get(code, t)
     return max(1, min(n_units, min(60, t)))
 
@@ -132,14 +182,40 @@ for code in sorted(units):
                 if h != gid:
                     out.add(h)
         return out
+    def same_region_neighbors(gid):
+        regs = groups[gid]["regions"] - {""}
+        return {k for k in neighbors_of(gid) if (groups[k]["regions"] & regs) and not groups[k].get("protected")}
+    for gid in groups:
+        groups[gid]["protected"] = items[gid]["protected"]
+    # Phase 1 : fusionner à l'intérieur des vraies régions (ex. départements -> régions françaises).
     while len(groups) > n_target:
-        gid = min(groups, key=lambda k: groups[k]["area"])
-        cand = neighbors_of(gid)
+        options = [k for k in groups if not groups[k]["protected"] and same_region_neighbors(k)]
+        if not options:
+            break
+        gid = min(options, key=lambda k: groups[k]["area"])
+        best = min(same_region_neighbors(gid), key=lambda k: groups[k]["area"])
+        g1, g2 = groups[best], groups.pop(gid)
+        g1["members"] += g2["members"]
+        g1["area"] += g2["area"]
+        g1["regions"] |= g2["regions"]
+        for m in g2["members"]:
+            owner[m] = best
+    # Phase 2 : fusions libres entre voisins.
+    while len(groups) > n_target:
+        free = [k for k in groups if not groups[k]["protected"]]
+        if not free:
+            break
+        gid = min(free, key=lambda k: groups[k]["area"])
+        cand = {k for k in neighbors_of(gid) if not groups[k]["protected"]} or neighbors_of(gid)
         if not cand:
             # île : rattachée au groupe le plus proche
             c0 = unary_union([geoms[m] for m in groups[gid]["members"]]).centroid
-            cand = {min((k for k in groups if k != gid),
-                        key=lambda k: geoms[groups[k]["members"][0]].centroid.distance(c0))}
+            others = [k for k in groups if k != gid]
+            if not others:
+                break
+            cand = {min(others, key=lambda k: geoms[groups[k]["members"][0]].centroid.distance(c0))}
+        if not cand:
+            break
         regs = groups[gid]["regions"]
         best = min(cand, key=lambda k: (0 if (groups[k]["regions"] & regs) - {""} else 1, groups[k]["area"]))
         g1, g2 = groups[best], groups.pop(gid)
@@ -163,8 +239,10 @@ for code in sorted(units):
         else:
             regs = {items[m]["region"] for m in members}
             reg = next(iter(regs))
-            if len(regs) == 1 and reg and region_sizes[reg] == len(members):
-                name = reg
+            if len(regs) == 1 and reg.startswith("__"):
+                name = items[members[0]]["name"]
+            elif len(regs) == 1 and reg and region_sizes[reg] == len(members):
+                name = clean(reg)
             else:
                 name = max((items[m] for m in members), key=lambda u: u["area"])["name"]
         final.append({"code": code, "name": name, "geom": geom, "area": g["area"],
