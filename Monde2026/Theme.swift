@@ -41,6 +41,45 @@ enum Theme {
         return Color(hue: hue, saturation: 0.45, brightness: 0.78)
     }
 
+    // MARK: Couleurs politiques de la carte (façon jeu de grande stratégie)
+
+    static let neutralLand = UIColor(red: 0.42, green: 0.44, blue: 0.47, alpha: 1)
+    static let rebelLand = UIColor(red: 0.30, green: 0.08, blue: 0.10, alpha: 1)
+
+    private static func hex(_ v: UInt32) -> UIColor {
+        UIColor(red: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255,
+                blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+    }
+
+    /// Couleurs « historiques » des grandes puissances, reconnaissables au premier coup d'œil.
+    private static let iconic: [CountryID: UInt32] = [
+        "USA": 0x3D6CB4, "CAN": 0xC05656, "MEX": 0x4E9A6A, "BRA": 0x3E9E5C, "ARG": 0x86B9DF, "COL": 0xD9B649,
+        "VEN": 0xB24A4A, "CHL": 0xA0526D, "PER": 0xC77B5B, "CUB": 0x5E7FB8,
+        "GBR": 0xB43C49, "FRA": 0x3A58A8, "DEU": 0x6E7378, "ITA": 0x4F9E6E, "ESP": 0xD4A83B, "PRT": 0x2F7D57,
+        "NLD": 0xE08A3A, "BEL": 0xC9B347, "CHE": 0xC8504F, "AUT": 0xD7D3C6, "POL": 0xCC5A6E, "SWE": 0x4F8FC7,
+        "NOR": 0x8E4C4C, "FIN": 0xE3E1D5, "DNK": 0xA84444, "GRC": 0x5AA0D6, "ROU": 0xD8C24A, "HUN": 0x6E9E4A,
+        "CZE": 0x4E6FA6, "UKR": 0xE3C14B, "BLR": 0x7FA56A, "RUS": 0x4E7D46, "SRB": 0x9B4F5C, "BGR": 0x6EA56B,
+        "TUR": 0xB34A3E, "IRN": 0x5FA376, "IRQ": 0xB8A06A, "SYR": 0x9C8A6A, "SAU": 0x5E9E5E, "ISR": 0x6F94C9,
+        "EGY": 0xD6B66B, "ARE": 0x4F8C7A, "ARM": 0xD07E3E, "AZE": 0x4B9DB8, "GEO": 0xC9C1B6,
+        "CHN": 0xC74B3A, "JPN": 0xE3D6B8, "KOR": 0x5A7DB5, "PRK": 0x8B3B48, "TWN": 0x3F6E9E, "MNG": 0x7C9BC9,
+        "IND": 0xE38B3F, "PAK": 0x2E7A4E, "BGD": 0x4F9C66, "AFG": 0x9A8B6E, "KAZ": 0x58AFC9,
+        "IDN": 0xB94A40, "VNM": 0xD2B04C, "THA": 0x6C5AA8, "MYS": 0x3F7BAE, "PHL": 0x5A88C8, "MMR": 0x7AA35A,
+        "AUS": 0x5F8AB7, "NZL": 0x4F6E8E, "ZAF": 0xC8933F, "NGA": 0x4C9A5B, "ETH": 0xD3B24C, "COD": 0x6AA8D0,
+        "DZA": 0x4E8F5A, "MAR": 0xB2504A, "LBY": 0x6E8F4A, "SDN": 0xA8875A, "KEN": 0x9C4E4E, "AGO": 0xB5544A
+    ]
+
+    static func politicalColor(_ id: CountryID) -> UIColor {
+        if let v = iconic[id] { return hex(v) }
+        var hash: UInt32 = 2166136261
+        for scalar in id.unicodeScalars {
+            hash = (hash ^ scalar.value) &* 16777619
+        }
+        let hue = CGFloat(hash % 360) / 360
+        let sat = 0.38 + CGFloat((hash >> 9) % 20) / 100
+        let bri = 0.62 + CGFloat((hash >> 17) % 18) / 100
+        return UIColor(hue: hue, saturation: sat, brightness: bri, alpha: 1)
+    }
+
     /// −100 → corail, 0 → acier, +100 → sarcelle.
     static func relationColor(_ value: Double) -> Color {
         let t = (value / 100).clamped(-1, 1)

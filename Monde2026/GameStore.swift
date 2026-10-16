@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 // =============================================================
 //  GameStore.swift
@@ -61,6 +62,9 @@ final class GameStore: ObservableObject {
     }
     @Published private(set) var mapSnapshot = MapSnapshot.empty
     @Published var selectedProvince: Int?
+    @Published var selectedCountry: CountryID?
+    @Published private(set) var focus: MapFocus?
+    private var focusCounter = 0
     @Published var satellite = false
     @Published var toasts: [GameEvent] = []
     @Published var feedback: String?
@@ -82,8 +86,10 @@ final class GameStore: ObservableObject {
         panel = nil
         toasts = []
         selectedProvince = nil
+        selectedCountry = nil
         version += 1
         refreshMap()
+        focusOn(id)
         startLoop()
     }
 
@@ -203,21 +209,51 @@ final class GameStore: ObservableObject {
             mapSnapshot = .empty
             return
         }
-        var selected: CountryID?
+        var selected = selectedCountry
         if case .country(let id)? = panel { selected = id }
         mapSnapshot = MapSnapshotBuilder.build(s, mode: mapMode, selected: selected, selectedProvince: selectedProvince)
     }
 
-    /// Toucher la carte : sélectionne la région et ouvre la fiche de son propriétaire.
+    /// Toucher la carte : sélectionne la région et affiche la fiche rapide de son propriétaire.
     func tapMap(_ point: GeoPoint) {
         guard let s = sim, let province = ProvinceMap.province(at: point) else {
-            selectedProvince = nil
-            refreshMap()
+            clearSelection()
             return
         }
         selectedProvince = province.id
         let owner = s.provinceOwners()[province.id]?.owner
-        open(.country(owner ?? province.country))
+        selectedCountry = owner ?? province.country
+        refreshMap()
+    }
+
+    func clearSelection() {
+        guard selectedProvince != nil || selectedCountry != nil else { return }
+        selectedProvince = nil
+        selectedCountry = nil
+        refreshMap()
+    }
+
+    /// Centre la carte sur un pays (ses régions actuelles).
+    func focusOn(_ id: CountryID) {
+        guard let s = sim else { return }
+        let owners = s.provinceOwners()
+        var rect = MKMapRect.null
+        for p in ProvinceMap.all where owners[p.id]?.owner == id {
+            // On ignore les petits territoires lointains (îles, outre-mer) pour bien cadrer le pays.
+            if p.weight < 3000 && !rect.isNull { continue }
+            rect = rect.union(p.bounds)
+        }
+        if let core = ProvinceMap.byCountry[id], rect.isNull {
+            for i in core { rect = rect.union(ProvinceMap.all[i].bounds) }
+        }
+        guard !rect.isNull else { return }
+        // Un pays immense (Russie, États-Unis avec l'Alaska…) : on cadre sur sa plus grande région.
+        if rect.size.width > MKMapRect.world.size.width * 0.45,
+           let big = ProvinceMap.all.filter({ owners[$0.id]?.owner == id }).max(by: { $0.weight < $1.weight }) {
+            rect = big.bounds.insetBy(dx: -big.bounds.size.width * 2, dy: -big.bounds.size.height * 2)
+        }
+        focusCounter += 1
+        focus = MapFocus(id: focusCounter, rect: rect)
     }
 
     var selectedProvinceInfo: (Province, ProvinceOwner)? {

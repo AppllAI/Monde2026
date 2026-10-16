@@ -1,14 +1,12 @@
 import Foundation
+import MapKit
 
 // =============================================================
 //  Provinces.swift
-//  Géométrie des régions et propriétaire de chacune.
-//
-//  Chaque région est une cellule de Voronoï autour de son centre,
-//  limitée à un rayon proportionnel à sa superficie : la carte
-//  ressemble à un vrai découpage, sans fichier de frontières.
-//  Les territoires occupés, annexés ou tenus par des rebelles
-//  sont attribués région par région, en partant du front.
+//  Les régions du monde, chargées depuis Resources/map.bin
+//  (construit par tools/build_map.py à partir de Natural Earth,
+//  données du domaine public) : vraies frontières, voisins,
+//  frontières partagées. Et le propriétaire de chaque région.
 // =============================================================
 
 struct GeoPoint: Codable, Hashable {
@@ -18,26 +16,44 @@ struct GeoPoint: Codable, Hashable {
 
 struct Province: Identifiable {
     let id: Int
-    let country: CountryID
+    let country: CountryID          // pays d'origine (peut être un pays neutre, non jouable)
+    let countryName: String
     let name: String
-    let center: GeoPoint
-    let weight: Double
-    let radiusKm: Double
-    let outline: [GeoPoint]
+    let label: GeoPoint             // point où écrire le nom
+    let areaKm2: Double
+    let rings: [[MKMapPoint]]       // contours en coordonnées MapKit
+    let bounds: MKMapRect
+    let path: CGPath                // contour prêt à dessiner (coordonnées MapKit)
+    let neighbors: [Int]
+
+    var weight: Double { max(areaKm2, 1) }
+    var center: GeoPoint { label }
+    var labelPoint: MKMapPoint { MKMapPoint(CLLocationCoordinate2D(latitude: label.lat, longitude: label.lon)) }
+}
+
+struct ProvinceBorder {
+    let a: Int
+    let b: Int
+    let lines: [[MKMapPoint]]
+    let path: CGPath
+    let bounds: MKMapRect
 }
 
 enum ProvinceStatus: String {
-    case core, occupied, annexed, rebel
+    case core, occupied, annexed, rebel, neutral
 }
 
-struct ProvinceOwner {
+struct ProvinceOwner: Equatable {
     let owner: CountryID?        // nil = rebelles
     let status: ProvinceStatus
 }
 
 enum ProvinceMap {
 
-    static let all: [Province] = build()
+    private static let loaded: (provinces: [Province], borders: [ProvinceBorder]) = load()
+
+    static var all: [Province] { loaded.provinces }
+    static var borders: [ProvinceBorder] { loaded.borders }
 
     static let byCountry: [CountryID: [Int]] = {
         var result: [CountryID: [Int]] = [:]
@@ -45,120 +61,153 @@ enum ProvinceMap {
         return result
     }()
 
-    // MARK: Plan local (km) autour d'un point
+    /// Ordre dans lequel un occupant prend les régions (les autres : les plus proches de lui d'abord).
+    static let occupationOrder: [String: [String]] = [
+        "UKR|RUS": ["Crimée", "Crimea", "Sébastopol", "Sevastopol", "Louhansk", "Luhansk", "Donetsk", "Zaporijjia",
+                    "Zaporizhzhia", "Kherson"],
+        "GEO|RUS": ["Ossétie du Sud", "Abkhazie", "Abkhazia", "Shida Kartli"],
+        "MDA|RUS": ["Transnistrie", "Stînga Nistrului", "Transnistria"],
+        "CYP|TUR": ["Chypre du Nord", "Northern Cyprus", "Lefkoşa", "Gazimağusa", "Girne", "Güzelyurt", "İskele"],
+        "SYR|ISR": ["Quneitra", "Kuneitra"]
+    ]
 
-    private static func local(_ p: GeoPoint, around o: GeoPoint) -> (Double, Double) {
-        var dLon = p.lon - o.lon
-        if dLon > 180 { dLon -= 360 }
-        if dLon < -180 { dLon += 360 }
-        let x = dLon * 111.32 * cos(o.lat * .pi / 180)
-        let y = (p.lat - o.lat) * 110.57
-        return (x, y)
-    }
+    // MARK: Lecture du fichier
 
-    private static func geo(_ x: Double, _ y: Double, around o: GeoPoint) -> GeoPoint {
-        let lat = (o.lat + y / 110.57).clamped(-85, 85)
-        var lon = o.lon + x / (111.32 * max(0.05, cos(o.lat * .pi / 180)))
-        if lon > 180 { lon -= 360 }
-        if lon < -180 { lon += 360 }
-        return GeoPoint(lat: lat, lon: lon.clamped(-179.9, 179.9))
+    private static func load() -> ([Province], [ProvinceBorder]) {
+        guard let url = Bundle.main.url(forResource: "map", withExtension: "bin"),
+              let data = try? Data(contentsOf: url) else {
+            return ([], [])
+        }
+        var reader = BinaryReader(data: data)
+        guard reader.ascii(4) == "MAP2" else { return ([], []) }
+        let count = Int(reader.u32())
+        var provinces: [Province] = []
+        provinces.reserveCapacity(count)
+        for id in 0..<count {
+            let code = reader.ascii(3).trimmingCharacters(in: .whitespaces)
+            let rawName = reader.string()
+            let countryName = reader.string()
+            let name = rawName == "?" || rawName.isEmpty ? countryName : rawName
+            let lat = Double(reader.f32()), lon = Double(reader.f32())
+            let area = Double(reader.f32())
+            let ringCount = Int(reader.u16())
+            var rings: [[MKMapPoint]] = []
+            var bounds = MKMapRect.null
+            let path = CGMutablePath()
+            for _ in 0..<ringCount {
+                let n = Int(reader.u32())
+                var ring: [MKMapPoint] = []
+                ring.reserveCapacity(n)
+                for _ in 0..<n {
+                    let x = Double(reader.f32()), y = Double(reader.f32())
+                    ring.append(MKMapPoint(CLLocationCoordinate2D(latitude: y.clamped(-85, 85), longitude: x.clamped(-180, 180))))
+                }
+                if let first = ring.first {
+                    path.move(to: CGPoint(x: first.x, y: first.y))
+                    for p in ring.dropFirst() { path.addLine(to: CGPoint(x: p.x, y: p.y)) }
+                    path.closeSubpath()
+                }
+                for p in ring { bounds = bounds.union(MKMapRect(x: p.x, y: p.y, width: 0, height: 0)) }
+                rings.append(ring)
+            }
+            let nCount = Int(reader.u16())
+            var neighbors: [Int] = []
+            for _ in 0..<nCount { neighbors.append(Int(reader.u16())) }
+            provinces.append(Province(id: id, country: code, countryName: countryName, name: name,
+                                      label: GeoPoint(lat: lat, lon: lon), areaKm2: area, rings: rings,
+                                      bounds: bounds, path: path, neighbors: neighbors))
+        }
+        var borders: [ProvinceBorder] = []
+        let edgeCount = Int(reader.u32())
+        for _ in 0..<edgeCount {
+            let a = Int(reader.u16()), b = Int(reader.u16())
+            let lineCount = Int(reader.u16())
+            var lines: [[MKMapPoint]] = []
+            var bounds = MKMapRect.null
+            let path = CGMutablePath()
+            for _ in 0..<lineCount {
+                let n = Int(reader.u32())
+                var line: [MKMapPoint] = []
+                for _ in 0..<n {
+                    let x = Double(reader.f32()), y = Double(reader.f32())
+                    line.append(MKMapPoint(CLLocationCoordinate2D(latitude: y.clamped(-85, 85), longitude: x.clamped(-180, 180))))
+                }
+                if let first = line.first {
+                    path.move(to: CGPoint(x: first.x, y: first.y))
+                    for p in line.dropFirst() { path.addLine(to: CGPoint(x: p.x, y: p.y)) }
+                }
+                for p in line { bounds = bounds.union(MKMapRect(x: p.x, y: p.y, width: 0, height: 0)) }
+                lines.append(line)
+            }
+            if reader.failed { break }
+            borders.append(ProvinceBorder(a: a, b: b, lines: lines, path: path, bounds: bounds))
+        }
+        return (provinces, borders)
     }
 
     static func distanceKm(_ a: GeoPoint, _ b: GeoPoint) -> Double {
-        let (x, y) = local(b, around: a)
+        var dLon = b.lon - a.lon
+        if dLon > 180 { dLon -= 360 }
+        if dLon < -180 { dLon += 360 }
+        let x = dLon * 111.32 * cos(a.lat * .pi / 180)
+        let y = (b.lat - a.lat) * 110.57
         return (x * x + y * y).squareRoot()
     }
 
-    // MARK: Construction
-
-    private static func build() -> [Province] {
-        // 1. Centres et superficies
-        var areas: [CountryID: Double] = [:]
-        var names: [CountryID: String] = [:]
-        for s in WorldData.seeds() + WorldDataExtra.seeds() {
-            areas[s.id] = s.area * 1000
-            names[s.id] = s.name
-        }
-        struct Seed {
-            let country: CountryID
-            let name: String
-            let center: GeoPoint
-            let weight: Double
-            let radius: Double
-        }
-        var seeds: [Seed] = []
-        for id in Geo.table.keys.sorted() {
-            let entries: [ProvinceData.Entry]
-            if let list = ProvinceData.lists[id], !list.isEmpty {
-                entries = list
-            } else {
-                let g = Geo.info(id)
-                entries = [(names[id] ?? id, g.lat, g.lon)]
-            }
-            let totalWeight = entries.reduce(0.0) { $0 + ProvinceData.weight(id, $1.0) }
-            for e in entries {
-                let w = ProvinceData.weight(id, e.0)
-                let area = (areas[id] ?? 50_000) * w / max(totalWeight, 0.001)
-                let radius = ((area / Double.pi).squareRoot() * 1.7).clamped(25, 800)
-                seeds.append(Seed(country: id, name: e.0, center: GeoPoint(lat: e.1, lon: e.2), weight: w, radius: radius))
-            }
-        }
-
-        // 2. Cellule de chaque région : cercle découpé par les médiatrices des voisines
-        var provinces: [Province] = []
-        for (i, s) in seeds.enumerated() {
-            var polygon: [(Double, Double)] = []
-            let sides = 30
-            for k in 0..<sides {
-                let a = Double(k) / Double(sides) * 2 * Double.pi
-                polygon.append((cos(a) * s.radius, sin(a) * s.radius))
-            }
-            for (j, other) in seeds.enumerated() where j != i {
-                let (ox, oy) = local(other.center, around: s.center)
-                let d2 = ox * ox + oy * oy
-                let reach = s.radius + other.radius
-                guard d2 < reach * reach, d2 > 0.0001 else { continue }
-                polygon = clip(polygon, nx: ox, ny: oy, limit: d2 / 2)
-                if polygon.count < 3 { break }
-            }
-            let outline = polygon.map { geo($0.0, $0.1, around: s.center) }
-            provinces.append(Province(id: i, country: s.country, name: s.name, center: s.center,
-                                      weight: s.weight, radiusKm: s.radius, outline: outline))
-        }
-        return provinces
-    }
-
-    /// Garde la partie du polygone où  x·nx + y·ny ≤ limit  (Sutherland–Hodgman).
-    private static func clip(_ poly: [(Double, Double)], nx: Double, ny: Double, limit: Double) -> [(Double, Double)] {
-        guard !poly.isEmpty else { return poly }
-        var result: [(Double, Double)] = []
-        for k in 0..<poly.count {
-            let a = poly[k]
-            let b = poly[(k + 1) % poly.count]
-            let va = a.0 * nx + a.1 * ny - limit
-            let vb = b.0 * nx + b.1 * ny - limit
-            if va <= 0 { result.append(a) }
-            if (va <= 0) != (vb <= 0) {
-                let t = va / (va - vb)
-                result.append((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t))
-            }
-        }
-        return result
-    }
-
-    /// Région sous un point de la carte (la plus proche dont le rayon couvre le point).
+    /// Région sous un point de la carte.
     static func province(at point: GeoPoint) -> Province? {
-        var best: Province?
-        var bestDistance = Double.infinity
-        for p in all {
-            guard abs(p.center.lat - point.lat) < 12 else { continue }
-            let d = distanceKm(p.center, point)
-            if d < bestDistance && d <= p.radiusKm {
-                best = p
-                bestDistance = d
-            }
+        let mp = MKMapPoint(CLLocationCoordinate2D(latitude: point.lat, longitude: point.lon))
+        let cg = CGPoint(x: mp.x, y: mp.y)
+        for p in all where p.bounds.contains(mp) {
+            if p.path.contains(cg) { return p }
         }
-        return best
+        return nil
+    }
+}
+
+/// Lecture d'un fichier binaire petit-boutiste.
+struct BinaryReader {
+    let data: Data
+    var offset = 0
+    var failed = false
+
+    init(data: Data) { self.data = data }
+
+    private mutating func bytes(_ n: Int) -> Data? {
+        guard offset + n <= data.count else {
+            failed = true
+            return nil
+        }
+        let slice = data.subdata(in: (data.startIndex + offset)..<(data.startIndex + offset + n))
+        offset += n
+        return slice
+    }
+
+    mutating func u16() -> UInt16 {
+        guard let b = bytes(2) else { return 0 }
+        return UInt16(b[b.startIndex]) | (UInt16(b[b.startIndex + 1]) << 8)
+    }
+
+    mutating func u32() -> UInt32 {
+        guard let b = bytes(4) else { return 0 }
+        var v: UInt32 = 0
+        for i in 0..<4 { v |= UInt32(b[b.startIndex + i]) << (8 * UInt32(i)) }
+        return v
+    }
+
+    mutating func f32() -> Float {
+        Float(bitPattern: u32())
+    }
+
+    mutating func ascii(_ n: Int) -> String {
+        guard let b = bytes(n) else { return "" }
+        return String(decoding: b, as: UTF8.self)
+    }
+
+    mutating func string() -> String {
+        let n = Int(u16())
+        guard let b = bytes(n) else { return "" }
+        return String(decoding: b, as: UTF8.self)
     }
 }
 
@@ -169,8 +218,13 @@ extension Simulation {
     /// Répartit occupations, annexions et zones rebelles entre les régions de chaque pays.
     func provinceOwners() -> [Int: ProvinceOwner] {
         var result: [Int: ProvinceOwner] = [:]
+        let provinces = ProvinceMap.all
         for (country, ids) in ProvinceMap.byCountry {
-            var free = ids.map { ProvinceMap.all[$0] }
+            guard state.countries[country] != nil else {
+                for id in ids { result[id] = ProvinceOwner(owner: country, status: .neutral) }
+                continue
+            }
+            var free = ids.map { provinces[$0] }
             let totalWeight = free.reduce(0.0) { $0 + $1.weight }
             var parts: [(holder: CountryID?, fraction: Double, status: ProvinceStatus)] = []
             for (holder, f) in state.annexation[country] ?? [:] where f > 0.001 {
@@ -186,7 +240,8 @@ extension Simulation {
                 if a.status != b.status { return a.status == .annexed }
                 return a.fraction > b.fraction
             }
-            let capital = free.first?.center ?? GeoPoint(lat: 0, lon: 0)
+            // La « capitale » : la plus grande région du pays.
+            let capital = free.max { $0.weight < $1.weight }?.label ?? GeoPoint(lat: 0, lon: 0)
             for part in parts {
                 let ordered = orderFor(part.holder, victim: country, candidates: free, capital: capital)
                 var taken = 0.0
@@ -212,14 +267,20 @@ extension Simulation {
     private func orderFor(_ holder: CountryID?, victim: CountryID, candidates: [Province], capital: GeoPoint) -> [Province] {
         guard let holder = holder else {
             // Rebelles : les régions les plus éloignées de la capitale tombent d'abord.
-            return candidates.sorted { ProvinceMap.distanceKm($0.center, capital) > ProvinceMap.distanceKm($1.center, capital) }
+            return candidates.sorted { ProvinceMap.distanceKm($0.label, capital) > ProvinceMap.distanceKm($1.label, capital) }
         }
-        let explicit = ProvinceData.occupationOrder[victim + "|" + holder] ?? []
-        let holderCenters = (ProvinceMap.byCountry[holder] ?? []).map { ProvinceMap.all[$0].center }
+        let explicit = ProvinceMap.occupationOrder[victim + "|" + holder] ?? []
+        let holderSet = Set(ProvinceMap.byCountry[holder] ?? [])
+        let holderCenters = (ProvinceMap.byCountry[holder] ?? []).map { ProvinceMap.all[$0].label }
         func frontDistance(_ p: Province) -> Double {
-            if let index = explicit.firstIndex(of: p.name) { return Double(index) - 1_000_000 }
-            if holderCenters.isEmpty { return ProvinceMap.distanceKm(p.center, capital) }
-            return holderCenters.map { ProvinceMap.distanceKm(p.center, $0) }.min() ?? 0
+            if let index = explicit.firstIndex(where: { p.name.localizedCaseInsensitiveContains($0) }) {
+                return Double(index) - 1_000_000
+            }
+            // Une région frontalière de l'occupant passe avant les autres.
+            let bordering = p.neighbors.contains { holderSet.contains($0) }
+            let base = holderCenters.isEmpty ? ProvinceMap.distanceKm(p.label, capital)
+                : (holderCenters.map { ProvinceMap.distanceKm(p.label, $0) }.min() ?? 0)
+            return bordering ? base - 100_000 : base
         }
         return candidates.sorted { frontDistance($0) < frontDistance($1) }
     }

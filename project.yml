@@ -14,6 +14,8 @@ targets:
     platform: iOS
     sources:
       - Monde2026
+      - path: Resources
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.brrrr999.monde2026

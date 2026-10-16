@@ -71,12 +71,19 @@ jobs:
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
 
-          # 3. Une partie en accéléré
+          # 3. Vue rapprochée (Ukraine sélectionnée, jeu en pause)
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -inspect UKR
+          sleep 20
+          xcrun simctl io "$UDID" screenshot /tmp/out/2-zoom-ukraine.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+
+          # 4. Une partie en accéléré
           (xcrun simctl launch --console-pty "$UDID" $BUNDLE -autostart FRA -speed 3 > game.log 2>&1 &)
-          sleep 15
-          xcrun simctl io "$UDID" screenshot /tmp/out/2-partie.png
-          sleep 45
-          xcrun simctl io "$UDID" screenshot /tmp/out/3-partie-1min.png
+          sleep 20
+          xcrun simctl io "$UDID" screenshot /tmp/out/3-partie.png
+          sleep 40
+          xcrun simctl io "$UDID" screenshot /tmp/out/4-partie-1min.png
           if xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE"; then
             echo "Jeu toujours lancé après 1 minute : OK" | tee -a /tmp/out/run.txt
           else

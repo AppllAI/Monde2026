@@ -12,7 +12,7 @@ struct GameView: View {
 
     var body: some View {
         ZStack {
-            WorldMapView(snapshot: store.mapSnapshot, satellite: store.satellite) { point in
+            WorldMapView(snapshot: store.mapSnapshot, satellite: store.satellite, focus: store.focus) { point in
                 store.tapMap(point)
             }
             .equatable()
@@ -22,8 +22,19 @@ struct GameView: View {
                 ModePicker(store: store)
                 Spacer()
                 NoticeStack(store: store)
+                if store.selectedCountry != nil {
+                    InspectorCard(store: store)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                HStack(alignment: .bottom) {
+                    MapLegend(mode: store.mapMode)
+                    Spacer()
+                    MapButtons(store: store)
+                }
+                .frame(maxWidth: 640)
                 Dock(store: store)
             }
+            .animation(.snappy, value: store.selectedCountry)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             if !tutorialSeen {

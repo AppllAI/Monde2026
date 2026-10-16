@@ -18,6 +18,11 @@ enum LaunchOptions {
         return arguments[i + 1]
     }
 
+    static func value(_ key: String) -> String? {
+        guard let i = arguments.firstIndex(of: key), i + 1 < arguments.count else { return nil }
+        return arguments[i + 1]
+    }
+
     static var autoSpeed: Int {
         guard let i = arguments.firstIndex(of: "-speed"), i + 1 < arguments.count else { return 0 }
         return Int(arguments[i + 1]) ?? 0
@@ -35,8 +40,11 @@ enum SelfTest {
         log("init \(String(format: "%.2f", Date().timeIntervalSince(start))) s, \(sim.state.countries.count) pays, \(ProvinceMap.all.count) régions")
         let owners = sim.provinceOwners()
         log("régions attribuées : \(owners.count)")
-        let bad = ProvinceMap.all.filter { $0.outline.count < 3 }.count
-        log("régions sans contour : \(bad)")
+        let bad = ProvinceMap.all.filter { $0.rings.isEmpty }.count
+        log("régions sans contour : \(bad), frontières : \(ProvinceMap.borders.count)")
+        let t0 = Date()
+        _ = MapSnapshotBuilder.build(sim, mode: .political, selected: nil, selectedProvince: nil)
+        log("image de la carte : \(String(format: "%.3f", Date().timeIntervalSince(t0))) s")
 
         let watched: [CountryID] = ["USA", "CHN", "FRA", "DEU", "RUS", "UKR", "IND", "BRA", "ARM", "SDN"]
         for year in 1...5 {

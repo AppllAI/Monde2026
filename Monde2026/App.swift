@@ -43,6 +43,11 @@ struct RootView: View {
                 store.newGame(as: id)
                 store.speed = LaunchOptions.autoSpeed
                 store.autoPause = false
+                if let inspect = LaunchOptions.value("-inspect") {
+                    store.selectedCountry = inspect
+                    store.focusOn(inspect)
+                    store.refreshMap()
+                }
             }
         }
     }
