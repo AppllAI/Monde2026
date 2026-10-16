@@ -65,6 +65,17 @@ enum Ideology: String, Codable, CaseIterable {
         }
     }
 
+    var withArticle: String {
+        switch self {
+        case .left: return "la gauche"
+        case .center: return "le centre"
+        case .right: return "la droite"
+        case .nationalist: return "les nationalistes"
+        case .islamist: return "les islamistes"
+        case .communist: return "les communistes"
+        }
+    }
+
     /// « la gauche remporte », « les nationalistes remportent »…
     var winnerPhrase: String {
         switch self {
@@ -323,7 +334,7 @@ extension Simulation {
                 c.support = 0.58
                 c.addModifier("Nouveau gouvernement", growth: 0, stability: -0.03, support: 0.05, months: 6)
                 if !isPlayer { applyNewGovernmentPolicies(&c) }
-                addEvent("🗳️ \(c.name) : alternance, \(c.ideology.winnerPhrase) les élections (\(previous.name.lowercased()) battus).",
+                addEvent("🗳️ \(c.name) : alternance, \(c.ideology.winnerPhrase) les élections face à \(previous.withArticle).",
                          important: isPlayer || c.gdp > 1500)
             }
         }
