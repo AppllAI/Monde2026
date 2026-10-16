@@ -216,7 +216,49 @@ struct BinaryReader {
 extension Simulation {
 
     /// Répartit occupations, annexions et zones rebelles entre les régions de chaque pays.
+    /// Propriétaire de chaque région : contrôle militaire réel (armées) + zones rebelles.
     func provinceOwners() -> [Int: ProvinceOwner] {
+        var result: [Int: ProvinceOwner] = [:]
+        let provinces = ProvinceMap.all
+        for (country, ids) in ProvinceMap.byCountry {
+            guard state.countries[country] != nil else {
+                for id in ids { result[id] = ProvinceOwner(owner: country, status: .neutral) }
+                continue
+            }
+            var free: [Province] = []
+            for id in ids {
+                if let holder = state.control[id], holder != country {
+                    result[id] = ProvinceOwner(owner: holder, status: state.annexedProvinces.contains(id) ? .annexed : .occupied)
+                } else {
+                    free.append(provinces[id])
+                }
+            }
+            // Les rebelles tiennent une part des régions encore contrôlées par le gouvernement.
+            if let rebels = state.countries[country]?.civilWar, rebels > 0.001 {
+                let totalWeight = ids.reduce(0.0) { $0 + provinces[$1].weight }
+                let capital = free.max { $0.weight < $1.weight }?.label ?? GeoPoint(lat: 0, lon: 0)
+                let ordered = orderFor(nil, victim: country, candidates: free, capital: capital)
+                var taken = 0.0
+                var remaining: [Province] = []
+                for p in ordered {
+                    if taken < rebels * totalWeight - p.weight / 2 {
+                        result[p.id] = ProvinceOwner(owner: nil, status: .rebel)
+                        taken += p.weight
+                    } else {
+                        remaining.append(p)
+                    }
+                }
+                free = remaining
+            }
+            for p in free {
+                result[p.id] = ProvinceOwner(owner: country, status: .core)
+            }
+        }
+        return result
+    }
+
+    /// Ancienne répartition à partir des pourcentages (sert seulement à placer la situation de départ).
+    func ownersFromFractions() -> [Int: ProvinceOwner] {
         var result: [Int: ProvinceOwner] = [:]
         let provinces = ProvinceMap.all
         for (country, ids) in ProvinceMap.byCountry {

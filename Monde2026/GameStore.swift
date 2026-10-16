@@ -64,6 +64,7 @@ final class GameStore: ObservableObject {
     @Published private(set) var mapSnapshot = MapSnapshot.empty
     @Published var selectedProvince: Int?
     @Published var selectedCountry: CountryID?
+    @Published var selectedArmy: Int?
     @Published private(set) var focus: MapFocus?
     private var focusCounter = 0
     @Published var satellite = false
@@ -131,8 +132,13 @@ final class GameStore: ObservableObject {
         version += 1
         // La carte ne se redessine que tous les 5 jours (et au changement de mois) : c'est ce qui garde la fluidité.
         let after = sim!.state.day
-        if after / 5 != before / 5 || Simulation.calendar.component(.day, from: sim!.currentDate) == 1 {
+        let armiesActive = sim!.state.armies.contains { !$0.path.isEmpty }
+        if after / 5 != before / 5 || Simulation.calendar.component(.day, from: sim!.currentDate) == 1
+            || (armiesActive && after / 2 != before / 2) {
             refreshMap()
+        }
+        if let id = selectedArmy, !(sim!.state.armies.contains { $0.id == id }) {
+            selectedArmy = nil
         }
         collectEvents()
         presentUrgent()
@@ -215,13 +221,44 @@ final class GameStore: ObservableObject {
         }
         var selected = selectedCountry
         if case .country(let id)? = panel { selected = id }
-        mapSnapshot = MapSnapshotBuilder.build(s, mode: mapMode, selected: selected, selectedProvince: selectedProvince)
+        mapSnapshot = MapSnapshotBuilder.build(s, mode: mapMode, selected: selected, selectedProvince: selectedProvince,
+                                               selectedArmy: selectedArmy)
     }
 
     /// Toucher la carte : sélectionne la région et affiche la fiche rapide de son propriétaire.
     func tapMap(_ point: GeoPoint) {
         guard let s = sim, let province = ProvinceMap.province(at: point) else {
             clearSelection()
+            return
+        }
+        let here = s.playerArmies(in: province.id)
+        // Une armée est sélectionnée : toucher une autre région = lui donner l'ordre d'y aller.
+        if let armyID = selectedArmy {
+            if let current = s.state.armies.first(where: { $0.id == armyID }), current.province == province.id {
+                // Toucher la région de l'armée : passer à l'armée suivante ici, ou désélectionner.
+                if let next = here.first(where: { $0.id > armyID }) ?? (here.count > 1 ? here.first : nil), next.id != armyID {
+                    selectedArmy = next.id
+                } else {
+                    selectedArmy = nil
+                }
+                refreshMap()
+                return
+            }
+            if !here.isEmpty && s.state.armies.first(where: { $0.id == armyID })?.path.isEmpty == true
+                && !(s.enemies(of: playerID ?? "").contains(s.controller(of: province.id))) {
+                // On touche une autre armée à nous : on la sélectionne.
+                selectedArmy = here[0].id
+                refreshMap()
+                return
+            }
+            perform { sim, _ in sim.orderArmy(armyID, to: province.id) }
+            return
+        }
+        if let first = here.first {
+            selectedArmy = first.id
+            selectedCountry = nil
+            selectedProvince = nil
+            refreshMap()
             return
         }
         selectedProvince = province.id
@@ -231,9 +268,22 @@ final class GameStore: ObservableObject {
     }
 
     func clearSelection() {
-        guard selectedProvince != nil || selectedCountry != nil else { return }
+        guard selectedProvince != nil || selectedCountry != nil || selectedArmy != nil else { return }
         selectedProvince = nil
         selectedCountry = nil
+        selectedArmy = nil
+        refreshMap()
+    }
+
+    func selectArmy(_ id: Int) {
+        guard let s = sim, let a = s.state.armies.first(where: { $0.id == id }) else { return }
+        selectedArmy = id
+        selectedCountry = nil
+        selectedProvince = nil
+        panel = nil
+        let b = ProvinceMap.all[a.province].bounds
+        focusCounter += 1
+        focus = MapFocus(id: focusCounter, rect: b.insetBy(dx: -b.size.width * 3 - 300_000, dy: -b.size.height * 3 - 300_000))
         refreshMap()
     }
 

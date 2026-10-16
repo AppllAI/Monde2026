@@ -22,7 +22,10 @@ struct GameView: View {
                 ModePicker(store: store)
                 Spacer()
                 NoticeStack(store: store)
-                if store.selectedCountry != nil {
+                if store.selectedArmy != nil {
+                    ArmyCard(store: store)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if store.selectedCountry != nil {
                     InspectorCard(store: store)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -35,6 +38,7 @@ struct GameView: View {
                 Dock(store: store)
             }
             .animation(.snappy, value: store.selectedCountry)
+            .animation(.snappy, value: store.selectedArmy)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             if !tutorialSeen {

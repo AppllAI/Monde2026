@@ -523,20 +523,8 @@ extension Simulation {
     mutating func applyPeace(warID: Int, terms: PeaceTerms) {
         guard let index = state.wars.firstIndex(where: { $0.id == warID && $0.isActive }) else { return }
         let war = state.wars[index]
-        for victim in war.attackers + war.defenders {
-            let enemySide = war.attackers.contains(victim) ? war.defenders : war.attackers
-            for occupier in enemySide {
-                guard let f = state.occupation[victim]?[occupier], f > 0 else { continue }
-                state.occupation[victim]?[occupier] = nil
-                if terms == .statusQuo {
-                    state.annexation[victim, default: [:]][occupier, default: 0] += f
-                }
-            }
-            if state.occupation[victim]?.isEmpty ?? false {
-                state.occupation[victim] = nil
-            }
-        }
         state.wars[index].isActive = false
+        settleProvinces(between: war.attackers, and: war.defenders, keep: terms == .statusQuo)
         for id in war.attackers + war.defenders {
             state.countries[id]?.capitulated = false
         }

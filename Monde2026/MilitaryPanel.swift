@@ -15,6 +15,7 @@ struct MilitaryPanel: View {
             overview(sim, c)
             WarsCard(store: store, sim: sim, country: c)
             PostureCard(store: store, country: c)
+            ArmiesCard(store: store, sim: sim, country: c)
             DivisionsCard(store: store, country: c)
             ConscriptionCard(store: store, country: c)
             EquipmentCard(country: c)
@@ -218,5 +219,63 @@ struct PostureCard: View {
             }
             .pickerStyle(.segmented)
         }
+    }
+}
+
+struct ArmiesCard: View {
+    @ObservedObject var store: GameStore
+    let sim: Simulation
+    let country: Country
+
+    var body: some View {
+        let mine = sim.armies(of: country.id)
+        let free = sim.unassignedCount(country.id)
+        Dossier(title: "Armées sur la carte",
+                subtitle: "\(mine.count) armées, \(free) divisions en garnison. Les garnisons défendent vos régions, surtout au front.") {
+            Toggle(isOn: Binding(
+                get: { sim.state.autoArmies },
+                set: { value in store.mutate { $0.setAutoArmies(value) } })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Commandement automatique").font(.system(size: 14)).foregroundStyle(Theme.paper)
+                    Text("Vos généraux déploient et attaquent seuls.").font(Theme.small).foregroundStyle(Theme.steel)
+                }
+            }
+            .tint(Theme.amber)
+            ForEach(mine) { a in
+                Button { store.selectArmy(a.id) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: a.engaged ? "flame.fill" : (a.path.isEmpty ? "shield.fill" : "arrow.right.circle.fill"))
+                            .foregroundStyle(a.engaged ? Theme.coral : Theme.amber).frame(width: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(a.name) : \(a.count) divisions").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.paper)
+                            Text(sim.armyStatus(a)).font(Theme.small).foregroundStyle(Theme.steel).lineLimit(1)
+                        }
+                        Spacer()
+                        Text(Fmt.pct(a.organization, 0)).font(Theme.data(12)).foregroundStyle(Theme.steel)
+                        Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.steel)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            if free > 0 {
+                HStack(spacing: 8) {
+                    ForEach([5, 10, free].filter { $0 <= free }.removingDuplicates(), id: \.self) { n in
+                        QuietButton(title: n == free ? "Former avec tout (\(n))" : "Former une armée de \(n)",
+                                    icon: "plus", tint: Theme.amber) {
+                            let id = country.id
+                            store.perform { s, _ in s.createArmy(for: id, size: n) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+extension Array where Element: Hashable {
+    func removingDuplicates() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }

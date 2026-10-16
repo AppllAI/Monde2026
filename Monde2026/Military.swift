@@ -353,7 +353,10 @@ extension Simulation {
             let sumB = allocation[f.b]?.values.reduce(0, +) ?? 0
             let airA = sumA > 0 ? landA : 1 / Double(max(1, frontCount[f.a] ?? 1))
             let airB = sumB > 0 ? landB : 1 / Double(max(1, frontCount[f.b] ?? 1))
-            resolveBattle(f, landA: landA, landB: landB, airA: airA, airB: airB)
+            // Les combats terrestres se jouent désormais région par région (Armies.swift) :
+            // ici, seulement la guerre aérienne.
+            _ = (landA, landB)
+            resolveBattle(f, landA: 0, landB: 0, airA: airA, airB: airB)
         }
         resolveNaval(fronts)
         for f in fronts {

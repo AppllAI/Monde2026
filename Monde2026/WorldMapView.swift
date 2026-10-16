@@ -61,19 +61,42 @@ struct PlanLine: Equatable, Identifiable {
     let to: GeoPoint
 }
 
+/// Pion d'armée sur la carte.
+struct ArmyMarker: Equatable, Identifiable {
+    let id: Int
+    let x: Double
+    let y: Double
+    let slot: Int              // décalage quand plusieurs armées sont dans la même région
+    let text: String
+    let flag: String
+    let color: RGBA
+    let isPlayer: Bool
+    let selected: Bool
+    let engaged: Bool
+}
+
+/// Trajet d'une armée (points MapKit).
+struct ArmyRoute: Equatable {
+    let points: [CGPoint]
+    let selected: Bool
+}
+
 struct MapSnapshot: Equatable {
     var fills: [ProvinceFill]
     var borders: [BorderKind]
     var labels: [MapLabel]
     var plans: [PlanLine]
     var selectedProvince: Int?
+    var armies: [ArmyMarker] = []
+    var routes: [ArmyRoute] = []
 
     static let empty = MapSnapshot(fills: [], borders: [], labels: [], plans: [], selectedProvince: nil)
 }
 
 enum MapSnapshotBuilder {
 
-    static func build(_ sim: Simulation, mode: MapMode, selected: CountryID?, selectedProvince: Int?) -> MapSnapshot {
+    static func build(_ sim: Simulation, mode: MapMode, selected: CountryID?, selectedProvince: Int?,
+                      selectedArmy: Int? = nil) -> MapSnapshot {
         let provinces = ProvinceMap.all
         guard !provinces.isEmpty else { return .empty }
         let owners = sim.provinceOwners()
@@ -219,8 +242,32 @@ enum MapSnapshotBuilder {
             plans.append(PlanLine(id: plan.attacker + ">" + plan.target,
                                   from: GeoPoint(lat: a.lat, lon: a.lon), to: GeoPoint(lat: b.lat, lon: b.lon)))
         }
-        return MapSnapshot(fills: fills, borders: borders, labels: labels, plans: plans,
-                           selectedProvince: selectedProvince)
+        // 5. Armées et trajets
+        var markers: [ArmyMarker] = []
+        var routes: [ArmyRoute] = []
+        var slots: [Int: Int] = [:]
+        for a in sim.state.armies.sorted(by: { $0.id < $1.id }) {
+            let lp = provinces[a.province].labelPoint
+            let slot = slots[a.province, default: 0]
+            slots[a.province] = slot + 1
+            let isPlayer = a.owner == player
+            markers.append(ArmyMarker(id: a.id, x: lp.x, y: lp.y, slot: slot, text: "\(a.count)", flag: Geo.flag(a.owner),
+                                      color: RGBA(Theme.politicalColor(a.owner)), isPlayer: isPlayer,
+                                      selected: a.id == selectedArmy, engaged: a.engaged))
+            if isPlayer && !a.path.isEmpty {
+                var pts = [CGPoint(x: lp.x, y: lp.y)]
+                for p in a.path {
+                    let q = provinces[p].labelPoint
+                    pts.append(CGPoint(x: q.x, y: q.y))
+                }
+                routes.append(ArmyRoute(points: pts, selected: a.id == selectedArmy))
+            }
+        }
+        var snap = MapSnapshot(fills: fills, borders: borders, labels: labels, plans: plans,
+                               selectedProvince: selectedProvince)
+        snap.armies = markers
+        snap.routes = routes
+        return snap
     }
 
     static func countryColor(_ id: CountryID, sim: Simulation, mode: MapMode) -> UIColor {
@@ -445,7 +492,22 @@ final class ProvinceRenderer: MKOverlayRenderer {
             context.setLineDash(phase: 0, lengths: [])
         }
 
-        // 5. Noms
+        // 5. Trajets des armées du joueur
+        for route in snap.routes where route.points.count >= 2 {
+            context.setStrokeColor(UIColor(Theme.amber).withAlphaComponent(route.selected ? 1 : 0.6).cgColor)
+            context.setLineWidth((route.selected ? 3 : 2) * px)
+            context.setLineDash(phase: 0, lengths: [8 * px, 5 * px])
+            context.move(to: route.points[0])
+            for p in route.points.dropFirst() { context.addLine(to: p) }
+            context.strokePath()
+            context.setLineDash(phase: 0, lengths: [])
+            if let last = route.points.last {
+                context.setFillColor(UIColor(Theme.amber).cgColor)
+                context.fillEllipse(in: CGRect(x: last.x - 5 * px, y: last.y - 5 * px, width: 10 * px, height: 10 * px))
+            }
+        }
+
+        // 6. Noms
         UIGraphicsPushContext(context)
         for label in snap.labels {
             let screen = label.size * zoomScale
@@ -458,6 +520,17 @@ final class ProvinceRenderer: MKOverlayRenderer {
             let rect = MKMapRect(x: label.x - halfWidth, y: label.y - label.size, width: halfWidth * 2, height: label.size * 2)
             guard rect.intersects(mapRect) else { continue }
             drawLabel(label, context: context)
+        }
+        // 7. Pions d'armées (taille fixe à l'écran)
+        let showAll = zoomScale > 1.0 / 32768
+        for m in snap.armies where m.isPlayer || m.selected || showAll {
+            let w = 50 * px, h = 24 * px
+            let cx = CGFloat(m.x) + CGFloat(m.slot) * 54 * px
+            let cy = CGFloat(m.y)
+            let box = CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
+            guard MKMapRect(x: Double(box.minX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
+                .intersects(mapRect) else { continue }
+            drawMarker(m, in: box, px: px, context: context)
         }
         UIGraphicsPopContext()
     }
@@ -495,6 +568,42 @@ final class ProvinceRenderer: MKOverlayRenderer {
             count += 1
         }
         context.strokePath()
+        context.restoreGState()
+    }
+
+    private func drawMarker(_ m: ArmyMarker, in box: CGRect, px: CGFloat, context: CGContext) {
+        let path = UIBezierPath(roundedRect: box, cornerRadius: 6 * px).cgPath
+        context.saveGState()
+        context.setShadow(offset: CGSize(width: 0, height: 1.5 * px), blur: 4 * px, color: UIColor.black.withAlphaComponent(0.6).cgColor)
+        context.addPath(path)
+        context.setFillColor(UIColor(red: 0.06, green: 0.09, blue: 0.13, alpha: 0.92).cgColor)
+        context.fillPath()
+        context.restoreGState()
+        // Bande de couleur du pays
+        let band = CGRect(x: box.minX, y: box.minY, width: 6 * px, height: box.height)
+        context.saveGState()
+        context.addPath(path)
+        context.clip()
+        context.setFillColor(m.color.cgColor)
+        context.fill(band)
+        context.restoreGState()
+        // Contour
+        let stroke: UIColor = m.selected ? UIColor(Theme.amber) : (m.engaged ? UIColor(Theme.coral) : UIColor.white.withAlphaComponent(m.isPlayer ? 0.8 : 0.4))
+        context.addPath(path)
+        context.setStrokeColor(stroke.cgColor)
+        context.setLineWidth((m.selected ? 2.5 : 1.2) * px)
+        context.strokePath()
+        // Drapeau + nombre de divisions
+        let text = (m.flag + " " + m.text + (m.engaged ? " ⚔︎" : "")) as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold),
+            .foregroundColor: UIColor.white
+        ]
+        let size = text.size(withAttributes: attrs)
+        context.saveGState()
+        context.translateBy(x: box.midX + 3 * px, y: box.midY)
+        context.scaleBy(x: px, y: px)
+        text.draw(at: CGPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attrs)
         context.restoreGState()
     }
 

@@ -61,6 +61,16 @@ enum SelfTest {
                 guard let c = sim.state.countries[id] else { continue }
                 log("  \(id) équip \(Int(c.divisionFill * 100))% mult \(String(format: "%.2f", c.combatMultiplier)) terre \(Int(c.landStrengthIndex)) air \(Int(c.airPower)) missiles \(Int(c.stock(.missile))) drones \(Int(c.stock(.drone))) pertes \(Int(c.casualties))k lassitude \(Int(c.warExhaustion * 100))% posture \(c.posture.name)")
             }
+            let ukrLost = (ProvinceMap.byCountry["UKR"] ?? []).filter { sim.controller(of: $0) != "UKR" }.count
+            log("  armées : RUS \(sim.armies(of: "RUS").count), UKR \(sim.armies(of: "UKR").count), total \(sim.state.armies.count) ; régions ukrainiennes tenues par l'ennemi : \(ukrLost)/\(ProvinceMap.byCountry["UKR"]?.count ?? 0)")
+            if year == 2 {
+                _ = sim.declareWar(attacker: "VEN", defender: "GUY")
+                log("  test : le Venezuela attaque le Guyana")
+            }
+            if year >= 2 {
+                let guy = (ProvinceMap.byCountry["GUY"] ?? []).filter { sim.controller(of: $0) != "GUY" }.count
+                log("  Guyana : \(guy)/\(ProvinceMap.byCountry["GUY"]?.count ?? 0) régions perdues, armées VEN \(sim.armies(of: "VEN").count)")
+            }
             log("tension \(Int(sim.state.worldTension)), plans de guerre \(sim.state.warPlans.count), prix pétrole \(String(format: "%.2f", sim.state.prices[.oil] ?? 1))")
         }
         let suspicious = sim.state.countries.values.filter { c in

@@ -53,6 +53,14 @@ struct GameState: Codable {
     var nextPendingEventID: Int
     var achievements: Set<String>
     var firedNews: Set<String>
+
+    // Guerre région par région
+    var armies: [Army]
+    var nextArmyID: Int
+    var control: [Int: CountryID]          // région -> pays qui la tient (si ce n'est pas son pays d'origine)
+    var annexedProvinces: Set<Int>
+    var provinceOrg: [Int: Double]         // organisation des garnisons après un combat
+    var autoArmies: Bool                   // le joueur laisse l'IA commander ses armées
 }
 
 struct Simulation {
@@ -99,7 +107,9 @@ struct Simulation {
                           relations: [:], relationMemory: [:], treaties: [], nextTreatyID: 1, blocs: [],
                           claims: [], warPlans: [], proposals: [], nextProposalID: 1, worldTension: 0,
                           difficulty: difficulty, record: nil, pendingEvents: [], nextPendingEventID: 1,
-                          achievements: [], firedNews: [])
+                          achievements: [], firedNews: [],
+                          armies: [], nextArmyID: 1, control: [:], annexedProvinces: [], provinceOrg: [:],
+                          autoArmies: false)
         for r in Resource.allCases {
             state.prices[r] = 1
         }
@@ -107,6 +117,7 @@ struct Simulation {
         setupPolitics()
         setupTechnologies()
         setupWorldRelations()
+        initializeControl()
         state.initialWorldGDP = countryIDs.reduce(0.0) { $0 + effectiveGDP($1) }
         for id in countryIDs {
             let atWar = isAtWar(id)
@@ -132,6 +143,7 @@ struct Simulation {
     mutating func advanceDay() {
         state.day += 1
         dailyMilitary()
+        dailyArmies()
         dailyWar()
         scheduledNews()
         if Simulation.calendar.component(.day, from: currentDate) == 1 {
