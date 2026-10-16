@@ -213,7 +213,8 @@ extension Simulation {
             let s = t.stats
             total += Double(n) * (s.defense + 0.3 * (s.softAttack * (1 - h) + s.hardAttack * h))
         }
-        let entrenched = a.daysInPlace >= 5 ? 1.15 : 1.0
+        // Retranchement progressif : jusqu'à +50 % après un mois sur place.
+        let entrenched = 1 + min(0.5, Double(a.daysInPlace) / 60)
         return total * c.combatMultiplier * c.posture.defense * (0.3 + 0.7 * a.organization) * entrenched
     }
 
@@ -233,7 +234,9 @@ extension Simulation {
         }
         // Milice minimale : une région n'est jamais vide.
         let militia = 12 * c.combatMultiplier
-        return total * share + militia
+        // Fortifications : sur son propre sol, la garnison tient mieux.
+        let fortified = ProvinceMap.all[province].country == id ? 1.3 : 1.0
+        return (total * share + militia) * fortified
     }
 
     /// Régions d'un pays qui touchent une région tenue par un ennemi.
@@ -624,7 +627,7 @@ extension Simulation {
             }
             if let r = retreat {
                 state.armies[j].province = r
-                state.armies[j].organization = 0.1
+                state.armies[j].organization = 0.3
                 state.armies[j].path = []
                 state.armies[j].daysInPlace = 0
             } else {
@@ -693,6 +696,17 @@ extension Simulation {
         }
     }
 
+    /// Guerres déjà en cours au début de la partie : armées déployées et retranchées depuis longtemps.
+    mutating func deployInitialArmies() {
+        let fighting = Set(state.wars.filter { $0.isActive }.flatMap { $0.attackers + $0.defenders })
+        for id in fighting.sorted() {
+            deployDefaultArmies(id, ratio: 0.8)
+        }
+        for i in state.armies.indices {
+            state.armies[i].daysInPlace = 90
+        }
+    }
+
     /// Forme des armées (environ 10 divisions chacune) et les place au front.
     mutating func deployDefaultArmies(_ id: CountryID, ratio: Double) {
         guard let c = state.countries[id] else { return }
@@ -724,9 +738,9 @@ extension Simulation {
         let front = frontierProvinces(id, enemies: foes)
         let threshold: Double
         switch c.posture {
-        case .offensive: threshold = 1.15
-        case .balanced: threshold = 1.4
-        case .defensive: threshold = 2.5
+        case .offensive: threshold = 1.3
+        case .balanced: threshold = 1.6
+        case .defensive: threshold = 3
         }
         var frontierCache: [CountryID: (Set<Int>, Int)] = [:]
         let mine = state.armies.indices.filter { state.armies[$0].owner == id && state.armies[$0].path.isEmpty }

@@ -118,6 +118,7 @@ struct Simulation {
         setupTechnologies()
         setupWorldRelations()
         initializeControl()
+        deployInitialArmies()
         state.initialWorldGDP = countryIDs.reduce(0.0) { $0 + effectiveGDP($1) }
         for id in countryIDs {
             let atWar = isAtWar(id)
