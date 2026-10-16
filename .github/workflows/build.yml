@@ -79,8 +79,26 @@ jobs:
           else
             echo "Le jeu s'est fermé (crash ?)" | tee -a /tmp/out/run.txt
           fi
-          ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i monde | head -3 | while read f; do
-            head -c 15000 ~/Library/Logs/DiagnosticReports/"$f" > /tmp/out/crash-"$f".txt
+          for f in ~/Library/Logs/DiagnosticReports/*Monde*; do
+            [ -f "$f" ] || continue
+            python3 - "$f" >> /tmp/out/crash.txt <<'PY'
+          import sys, json
+          raw = open(sys.argv[1]).read()
+          body = json.loads(raw.split("\n", 1)[1])
+          print("=== CRASH", sys.argv[1])
+          print("exception:", body.get("exception"))
+          print("asi:", body.get("asi"))
+          imgs = body.get("usedImages", [])
+          ft = body.get("faultingThread", 0)
+          for i, th in enumerate(body.get("threads", [])):
+              if i != ft and i != 0:
+                  continue
+              print("--- thread", i, "(crash)" if i == ft else "", th.get("queue", ""))
+              for fr in th.get("frames", [])[:40]:
+                  ix = fr.get("imageIndex")
+                  name = imgs[ix].get("name", "?") if ix is not None and ix < len(imgs) else "?"
+                  print("  ", name, fr.get("symbol"), fr.get("sourceFile", ""), fr.get("sourceLine", ""))
+          PY
           done
 
       - name: Publier le résultat dans la branche ci-results
