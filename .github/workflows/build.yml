@@ -1,0 +1,55 @@
+name: Compilation iOS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Préparer le projet Xcode
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Compiler pour le simulateur iOS
+        run: |
+          set -o pipefail
+          xcodebuild -project Monde2026.xcodeproj -scheme Monde2026 \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log || true
+          grep -E "error:|BUILD SUCCEEDED|BUILD FAILED" build.log | sort -u | head -300 > errors.txt || true
+          if grep -q "BUILD SUCCEEDED" build.log; then echo "OK" > status.txt; else echo "ECHEC" > status.txt; fi
+          cat status.txt
+          cat errors.txt
+
+      - name: Publier le résultat dans la branche ci-results
+        run: |
+          mkdir -p /tmp/out
+          cp status.txt errors.txt /tmp/out/
+          echo "${GITHUB_SHA}" > /tmp/out/commit.txt
+          tail -c 200000 build.log > /tmp/out/build-tail.log
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git checkout --orphan ci-results
+          git rm -rf . > /dev/null
+          cp /tmp/out/* .
+          git add status.txt errors.txt commit.txt build-tail.log
+          git commit -m "Résultat de compilation ${GITHUB_SHA}"
+          git push -f origin ci-results
+
+      - name: Échouer si la compilation a échoué
+        run: grep -q OK /tmp/out/status.txt
