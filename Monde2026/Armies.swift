@@ -200,10 +200,7 @@ extension Simulation {
             let armor = c.has(.nextGenArmor) && (t == .armored || t == .mechanized) ? 1.12 : 1.0
             total += Double(n) * (s.softAttack * (1 - h) + s.hardAttack * h + s.breakthrough * 0.5) * armor
         }
-        let share = Double(a.count) / Double(max(1, c.divisionCount))
-        let droneValue = 0.03 * c.tech * (c.has(.autonomousDrones) ? 1.6 : 1)
-        let drones = c.stock(.drone) * share * droneValue
-        return (total * c.combatMultiplier + drones) * c.posture.attack * (0.3 + 0.7 * a.organization)
+        return (total * c.combatMultiplier + droneSupport(c, armyCount: a.count)) * c.posture.attack * (0.3 + 0.7 * a.organization)
     }
 
     func armyDefense(_ a: Army, vsHardness h: Double) -> Double {
@@ -215,7 +212,15 @@ extension Simulation {
         }
         // Retranchement progressif : jusqu'à +50 % après un mois sur place.
         let entrenched = 1 + min(0.5, Double(a.daysInPlace) / 60)
-        return total * c.combatMultiplier * c.posture.defense * (0.3 + 0.7 * a.organization) * entrenched
+        return (total * c.combatMultiplier + droneSupport(c, armyCount: a.count)) * c.posture.defense
+            * (0.3 + 0.7 * a.organization) * entrenched
+    }
+
+    /// Appui des drones : rendements décroissants (des milliers de drones ne remplacent pas une armée).
+    func droneSupport(_ c: Country, armyCount: Int) -> Double {
+        let share = Double(armyCount) / Double(max(1, c.divisionCount))
+        let quality = c.tech * (c.has(.autonomousDrones) ? 1.6 : 1) * (c.has(.electronicWarfare) ? 1.1 : 1)
+        return 3 * (c.stock(.drone) * share).squareRoot() * quality
     }
 
     /// Défense des divisions hors armées : concentrée sur les régions du front.
@@ -541,7 +546,7 @@ extension Simulation {
             attack += value
         }
         let air = airSuperiority(leadOwner, defenderCountry)
-        attack *= 1 + 0.2 * (air - 0.5) * 2
+        attack *= 1 + 0.1 * (air - 0.5) * 2
 
         var armyDefenseTotal = 0.0
         for j in defenders { armyDefenseTotal += armyDefense(state.armies[j], vsHardness: attHardness) }
@@ -555,7 +560,7 @@ extension Simulation {
             * (0.3 + 0.7 * garrisonOrg)
         var defense = armyDefenseTotal + garrison
         if ProvinceMap.all[target].country == defenderCountry { defense *= 1.25 }    // on défend sa terre
-        defense *= 1 + 0.2 * (0.5 - air) * 2
+        defense *= 1 + 0.1 * (0.5 - air) * 2
         let noise = Double.random(in: 0.85...1.15, using: &state.rng)
         attack *= noise
 
@@ -659,6 +664,8 @@ extension Simulation {
         recomputeTerritory(province.country)
         // Les vainqueurs entrent dans la région.
         for i in attackers where state.armies.indices.contains(i) {
+            // Tenir le terrain conquis épuise : pas d'enchaînement immédiat.
+            state.armies[i].organization = max(0, state.armies[i].organization - 0.2)
             state.armies[i].province = target
             if state.armies[i].path.first == target { state.armies[i].path.removeFirst() }
             state.armies[i].progress = 0
