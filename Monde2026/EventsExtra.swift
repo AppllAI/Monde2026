@@ -36,7 +36,8 @@ extension EventCatalog {
                     }
                 },
                 EventOption(label: "Concession à un allié", detail: "Recettes de 0,5 % du PIB, relation +20 avec votre meilleur ami", aiWeight: 1) { sim, e in
-                    sim.state.countries[e.country]?.debt -= sim.effectiveGDP(e.country) * 0.005
+                    let newValue_debt = sim.effectiveGDP(e.country) * 0.005
+                    sim.state.countries[e.country]?.debt -= newValue_debt
                     if let f = sim.closestFriend(of: e.country) { sim.changeRelation(e.country, f, by: 20) }
                 }
             ]),
@@ -220,7 +221,8 @@ extension EventCatalog {
                     sim.adjust(e.country) { c in c.support += 0.03 }
                 },
                 EventOption(label: "Accepter l'offre", detail: "Recettes de 0,3 % du PIB, relation +10", aiWeight: 1) { sim, e in
-                    sim.state.countries[e.country]?.debt -= sim.effectiveGDP(e.country) * 0.003
+                    let newValue_debt = sim.effectiveGDP(e.country) * 0.003
+                    sim.state.countries[e.country]?.debt -= newValue_debt
                     if let t = e.target { sim.changeRelation(e.country, t, by: 10) }
                 }
             ]),

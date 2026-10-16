@@ -252,7 +252,8 @@ extension Simulation {
             }
         }
         changeRelation(sponsor, target, by: -15)
-        state.countries[sponsor]?.influence = min(100, (state.countries[sponsor]?.influence ?? 0) + 5)
+        let newValue_influence = min(100, (state.countries[sponsor]?.influence ?? 0) + 5)
+        state.countries[sponsor]?.influence = newValue_influence
         addEvent("🇺🇳 ONU : \(title), adoptée (\(yes) voix sur 15).", important: true)
         return ActionResult(success: true, message: "Résolution adoptée (\(yes) voix sur 15).")
     }
