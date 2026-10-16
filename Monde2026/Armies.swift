@@ -186,6 +186,11 @@ extension Simulation {
         state.armies.removeAll { $0.owner == id && $0.count == 0 }
     }
 
+    /// Nombre de divisions qui peuvent combattre en même temps dans une région.
+    func combatWidth(_ province: Int) -> Double {
+        12 + ProvinceMap.all[province].weight.squareRoot() / 30
+    }
+
     func distanceKm(_ a: Int, _ b: Int) -> Double {
         ProvinceMap.distanceKm(ProvinceMap.all[a].label, ProvinceMap.all[b].label)
     }
@@ -545,11 +550,17 @@ extension Simulation {
             if state.armies[i].amphibious { value *= 0.6 }
             attack += value
         }
+        // Largeur de front : on ne peut engager qu'un nombre limité de divisions dans une région.
+        let width = combatWidth(target)
+        let attackingDivisions = attackers.reduce(0) { $0 + state.armies[$1].count }
+        attack *= min(1, width / Double(max(1, attackingDivisions)))
         let air = airSuperiority(leadOwner, defenderCountry)
         attack *= 1 + 0.1 * (air - 0.5) * 2
 
         var armyDefenseTotal = 0.0
         for j in defenders { armyDefenseTotal += armyDefense(state.armies[j], vsHardness: attHardness) }
+        let defendingDivisions = defenders.reduce(0) { $0 + state.armies[$1].count }
+        armyDefenseTotal *= min(1, width / Double(max(1, defendingDivisions)))
         if frontierCache[defenderCountry] == nil {
             let front = frontierProvinces(defenderCountry, enemies: defenderFoes)
             frontierCache[defenderCountry] = (front, provincesControlled(by: defenderCountry).count)
@@ -790,11 +801,14 @@ extension Simulation {
                     def += armyDefense(d, vsHardness: a.hardness)
                 }
                 if ProvinceMap.all[n].country == defender { def *= 1.25 }
-                // Les armées amies voisines de la même cible attaquent avec nous.
+                // Les armées amies voisines de la même cible attaquent avec nous (dans la limite du front).
                 var att = 0.0
+                var divs = 0
                 for j in mine where state.armies[j].organization > 0.6 && ProvinceMap.all[state.armies[j].province].neighbors.contains(n) {
                     att += armyAttack(state.armies[j], vsHardness: 0.2)
+                    divs += state.armies[j].count
                 }
+                att *= min(1, combatWidth(n) / Double(max(1, divs)))
                 let ratio = att / max(def, 0.001)
                 if ratio > (best?.1 ?? 0) { best = (n, ratio) }
             }
