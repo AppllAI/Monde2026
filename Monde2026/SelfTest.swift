@@ -46,6 +46,22 @@ enum SelfTest {
         _ = MapSnapshotBuilder.build(sim, mode: .political, selected: nil, selectedProvince: nil)
         log("image de la carte : \(String(format: "%.3f", Date().timeIntervalSince(t0))) s")
 
+        // Suivi détaillé du front russo-ukrainien pendant les 6 premiers mois.
+        var probe = sim
+        for month in 1...6 {
+            probe.advance(days: 30)
+            let lost = (ProvinceMap.byCountry["UKR"] ?? []).filter { probe.controller(of: $0) != "UKR" }
+            let names = lost.map { ProvinceMap.all[$0].name }.sorted().joined(separator: ", ")
+            let ru = probe.armies(of: "RUS"), ua = probe.armies(of: "UKR")
+            let ruOrg = ru.isEmpty ? 0 : ru.reduce(0.0) { $0 + $1.organization } / Double(ru.count)
+            let uaOrg = ua.isEmpty ? 0 : ua.reduce(0.0) { $0 + $1.organization } / Double(ua.count)
+            let ruDiv = ru.reduce(0) { $0 + $1.count }, uaDiv = ua.reduce(0) { $0 + $1.count }
+            let uaFront = probe.frontierProvinces("UKR", enemies: ["RUS"])
+            let covered = uaFront.filter { p in ua.contains { $0.province == p } }.count
+            log("mois \(month) : UKR perd \(lost.count) [\(names)]")
+            log("   RUS \(ru.count) armées / \(ruDiv) div / org \(Int(ruOrg * 100)) % ; UKR \(ua.count) armées / \(uaDiv) div / org \(Int(uaOrg * 100)) % ; garnison UKR \(probe.unassignedCount("UKR")) ; front UKR \(covered)/\(uaFront.count) régions tenues par une armée")
+        }
+
         let watched: [CountryID] = ["USA", "CHN", "FRA", "DEU", "RUS", "UKR", "IND", "BRA", "ARM", "SDN"]
         for year in 1...5 {
             let t = Date()
