@@ -83,7 +83,7 @@ PREFIXES = ["oblast de ", "oblast d'", "kraï de ", "kraï du ", "république de
             "d'", "l'", "la ", "le "]
 
 def clean(name):
-    n = name.strip()
+    n = name.strip().replace(" S.A.R.", "").replace(" S.A.R", "")
     changed = True
     while changed:
         changed = False
@@ -108,7 +108,7 @@ def code_for(props):
     return a3  # pays neutre (non jouable)
 
 def name_for(props):
-    for key in ("name_fr", "name", "name_en", "gn_name"):
+    for key in ("name_fr", "name", "name_en", "gn_name", "woe_name", "name_local"):
         v = props.get(key)
         if v:
             return clean(v)
@@ -136,10 +136,14 @@ for f in data["features"]:
     a3 = p.get("adm0_a3") or ""
     region = (p.get("region") or "").strip()
     name = name_for(p)
-    if a3 in ALIAS and ALIAS[a3] == code:
+    if code != a3 and code in DE_JURE.values() and a3 not in ALIAS:
+        # Région rattachée de jure (Crimée, Sébastopol) : une seule région « Crimée ».
+        region = "__crimee"
+        name = "Crimée"
+    elif a3 in ALIAS and ALIAS[a3] == code:
         # Territoire rattaché (Hong Kong, Groenland…) : une seule région à son nom.
         region = "__" + a3
-        name = p.get("admin") or name
+        name = clean(NEUTRAL_FR.get(a3) or p.get("admin") or name)
     raw = " ".join(str(p.get(k) or "") for k in ("name", "name_en", "name_fr")).lower()
     protected = any(k in raw for k in PROTECTED)
     units[code].append({"geom": g, "name": name, "region": region, "area": area, "protected": protected})
