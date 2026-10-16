@@ -460,9 +460,10 @@ extension Simulation {
 
         // 8 bis. À long terme, chaque économie converge vers sa croissance potentielle
         // (les pays moins avancés rattrapent leur retard plus vite). Évite les booms ou crises sans fin.
-        let potential = 0.012 + 0.035 * max(0, 1 - c.tech)
-        let baseline = (c.growthCalibration + effects) - potential
-        c.growthCalibration -= baseline / 72
+        // La croissance totale (y compris les chantiers) est ramenée doucement vers ce potentiel.
+        let potential = 0.010 + 0.035 * max(0, 1 - c.tech) + (c.infrastructure - 0.6) * 0.02 + (c.stability - 0.6) * 0.02
+        let gap = c.growth - potential
+        c.growthCalibration -= gap / 48
         // L'aide étrangère diminue une fois la paix revenue.
         if !atWar { c.foreignAid *= 0.97 }
 
