@@ -1,4 +1,4 @@
-régions 1940, frontières 4633, points 299605, taille 2561024 octets
+régions 1940, frontières 4633, points 299605, taille 2562964 octets
 pays du jeu sans région : 
 pays neutres : AND (Andorre), ATC (Ashmore-et-Cartier), ATG (Antigua-et-Barbuda), BRB (Barbade), COM (Comores), CPV (Cap-Vert), DMA (Dominique), FSM (Micronésie), GRD (Grenade), KIR (Kiribati), KNA (Saint-Christophe), LCA (Sainte-Lucie), LIE (Liechtenstein), MCO (Monaco), MDV (Maldives), MHL (Îles Marshall), MUS (Maurice), NRU (Nauru), PCN (Pitcairn), PLW (Palaos), PSX (Palestine), SAH (Sahara occidental), SLB (Îles Salomon), SMR (Saint-Marin), STP (Sao Tomé-et-Principe), SYC (Seychelles), TON (Tonga), TUV (Tuvalu), VAT (Vatican), VCT (Saint-Vincent), VUT (Vanuatu), WSM (Samoa)
 AFG (20) : Badakhchan | Baghlân | Balkh | Bâdghîs | Bâmiyân | Farâh | Fâryâb | Ghazni | Ghôr | Helmand | Hérât | Kandahâr | Nangarhâr | Nimrôz | Nourestân | Paktîkâ | Sar-é Pol | Takhâr | Wardak | Zabol
