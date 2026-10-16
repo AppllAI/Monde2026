@@ -428,7 +428,8 @@ enum EventCatalog {
                     sim.addModifier(e.country, "Boom technologique", growth: 0.008, months: 12)
                 },
                 EventOption(label: "Taxer les profits", detail: "Recettes de 0,3 % du PIB", aiWeight: 1) { sim, e in
-                    sim.state.countries[e.country]?.debt -= sim.effectiveGDP(e.country) * 0.003
+                    let gain = sim.effectiveGDP(e.country) * 0.003
+                    sim.state.countries[e.country]?.debt -= gain
                 }
             ]),
 
