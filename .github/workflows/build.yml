@@ -30,7 +30,7 @@ jobs:
           xcodebuild -project Monde2026.xcodeproj -scheme Monde2026 \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -configuration Debug -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log || true
+            CODE_SIGNING_ALLOWED=NO -continueBuildingAfterErrors build 2>&1 | tee build.log || true
           grep -E "error:|BUILD SUCCEEDED|BUILD FAILED" build.log | sort -u | head -300 > errors.txt || true
           if grep -q "BUILD SUCCEEDED" build.log; then echo "OK" > status.txt; else echo "ECHEC" > status.txt; fi
           cat status.txt

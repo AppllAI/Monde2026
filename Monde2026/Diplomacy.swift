@@ -884,7 +884,7 @@ extension Simulation {
         aiProposalsToPlayer()
         let today = state.day
         state.proposals.removeAll { today - $0.day > 60 }
-        state.worldTension = (state.worldTension * 0.97 + Double(activeWars.count) * 0.8).clamped(0, 100)
+        state.worldTension = (state.worldTension * 0.97 + Double(activeWarsList.count) * 0.8).clamped(0, 100)
     }
 
     private mutating func updateWarMomentum() {
@@ -903,7 +903,7 @@ extension Simulation {
     }
 
     private mutating func aiPeace() {
-        for war in activeWars {
+        for war in activeWarsList {
             guard let attacker = leader(of: war.attackers), let defender = leader(of: war.defenders) else { continue }
             let playerIn = state.playerID.map { war.attackers.contains($0) || war.defenders.contains($0) } ?? false
             if playerIn, let player = state.playerID, let sides = warSide(of: player, in: war),
@@ -932,7 +932,7 @@ extension Simulation {
 
     /// Les pays proches d'un belligérant (et hostiles à son ennemi) lui envoient du matériel.
     private mutating func aiMilitaryAid() {
-        for war in activeWars {
+        for war in activeWarsList {
             for asAttacker in [false, true] {
                 let side = asAttacker ? war.attackers : war.defenders
                 let foes = asAttacker ? war.defenders : war.attackers
