@@ -297,11 +297,15 @@ extension Simulation {
                 var taken = 0.0
                 let target = part.fraction * totalWeight
                 var remaining: [Province] = []
+                // On prend les régions dans l'ordre du front et on s'arrête dès que la part est atteinte
+                // (sinon de petites régions lointaines seraient ajoutées pour « compléter »).
+                var full = false
                 for p in ordered {
-                    if taken < target - p.weight / 2 {
+                    if !full && taken < target - p.weight / 2 {
                         result[p.id] = ProvinceOwner(owner: part.holder, status: part.status)
                         taken += p.weight
                     } else {
+                        full = true
                         remaining.append(p)
                     }
                 }
