@@ -458,11 +458,19 @@ extension Simulation {
         // 8. Population
         c.population *= 1 + c.populationGrowth / 12
 
+        // 8 bis. À long terme, chaque économie converge vers sa croissance potentielle
+        // (les pays moins avancés rattrapent leur retard plus vite). Évite les booms ou crises sans fin.
+        let potential = 0.012 + 0.035 * max(0, 1 - c.tech)
+        let baseline = (c.growthCalibration + effects) - potential
+        c.growthCalibration -= baseline / 72
+        // L'aide étrangère diminue une fois la paix revenue.
+        if !atWar { c.foreignAid *= 0.97 }
+
         // 9. Lassitude de guerre : pertes, territoire occupé, durée.
         let newCasualties = c.casualties - c.casualtiesAtLastMonth
         c.casualtiesAtLastMonth = c.casualties
         if atWar {
-            let fromLosses = newCasualties / max(c.population * 1000 * 0.01, 1)
+            let fromLosses = newCasualties / max(c.population * 1000 * 0.03, 1)
             c.warExhaustion = min(1, c.warExhaustion + fromLosses + occupiedNow * 0.04 + 0.005)
         } else {
             c.warExhaustion = max(0, c.warExhaustion - 0.04)
