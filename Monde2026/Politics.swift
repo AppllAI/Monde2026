@@ -65,6 +65,18 @@ enum Ideology: String, Codable, CaseIterable {
         }
     }
 
+    /// « la gauche remporte », « les nationalistes remportent »…
+    var winnerPhrase: String {
+        switch self {
+        case .left: return "la gauche remporte"
+        case .center: return "le centre remporte"
+        case .right: return "la droite remporte"
+        case .nationalist: return "les nationalistes remportent"
+        case .islamist: return "les islamistes remportent"
+        case .communist: return "les communistes remportent"
+        }
+    }
+
     /// Influence sur l'agressivité de l'IA.
     var aggressionFactor: Double {
         switch self {
@@ -311,7 +323,7 @@ extension Simulation {
                 c.support = 0.58
                 c.addModifier("Nouveau gouvernement", growth: 0, stability: -0.03, support: 0.05, months: 6)
                 if !isPlayer { applyNewGovernmentPolicies(&c) }
-                addEvent("🗳️ \(c.name) : alternance, les \(c.ideology.name.lowercased()) remplacent les \(previous.name.lowercased()).",
+                addEvent("🗳️ \(c.name) : alternance, \(c.ideology.winnerPhrase) les élections (\(previous.name.lowercased()) battus).",
                          important: isPlayer || c.gdp > 1500)
             }
         }
@@ -355,12 +367,12 @@ extension Simulation {
                 c.stability = 0.45
                 c.support = 0.5
                 c.freedom = .repressed
-                addEvent("🪖 Coup d'État en \(c.name) : l'armée prend le pouvoir.", important: c.gdp > 300)
+                addEvent("🪖 Coup d'État : l'armée prend le pouvoir (\(c.name)).", important: c.gdp > 300)
             }
         } else if c.stability < 0.12 && c.civilWar == 0 && roll > 0.97 {
             c.civilWar = 0.08
             c.rebelStrength = max(1, c.landStrengthIndex * 0.45)
-            addEvent("🔥 Insurrection armée en \(c.name).", important: isPlayer || c.gdp > 500)
+            addEvent("🔥 Insurrection armée : \(c.name).", important: isPlayer || c.gdp > 500)
         }
 
         state.countries[id] = c

@@ -248,19 +248,45 @@ extension Simulation {
     }
 
     /// Relation « structurelle » : ce que justifient blocs, traités, revendications et guerres.
+    /// Relation justifiée par les blocs, traités, revendications et guerres (un seul passage sur chaque liste).
     func structuralRelation(_ a: CountryID, _ b: CountryID) -> Double {
         var r = 0.0
-        if shareMilitaryBloc(a, b) { r += 35 }
-        if shareEconomicBloc(a, b) { r += 20 }
-        if sharePoliticalBloc(a, b) { r += 10 }
-        if hasTreaty(.alliance, a, b) { r += 30 }
-        if hasTreaty(.tradePact, a, b) { r += 10 }
-        if hasTreaty(.nonAggression, a, b) { r += 5 }
-        if hasTreaty(.guarantee, a, b) || hasTreaty(.guarantee, b, a) { r += 20 }
-        if claim(by: a, on: b) != nil || claim(by: b, on: a) != nil { r -= 30 }
-        if areSanctioning(a, b) { r -= 35 }
-        if inOpposedBlocs(a, b) { r -= 25 }
-        if enemies(of: a).contains(b) { r -= 100 }
+        var military = false, economic = false, political = false
+        var aInNato = false, bInNato = false, aInCsto = false, bInCsto = false
+        for bloc in state.blocs {
+            let hasA = bloc.members.contains(a)
+            let hasB = bloc.members.contains(b)
+            if hasA && hasB {
+                if bloc.isMilitary { military = true } else if bloc.isEconomic { economic = true } else { political = true }
+            }
+            if bloc.id == "OTAN" { aInNato = hasA; bInNato = hasB }
+            if bloc.id == "OTSC" { aInCsto = hasA; bInCsto = hasB }
+        }
+        if military { r += 35 }
+        if economic { r += 20 }
+        if political { r += 10 }
+        var guarantee = false, sanctions = false
+        for t in state.treaties where (t.a == a && t.b == b) || (t.a == b && t.b == a) {
+            switch t.kind {
+            case .alliance: r += 30
+            case .tradePact: r += 10
+            case .nonAggression: r += 5
+            case .guarantee: guarantee = true
+            case .sanctions: sanctions = true
+            }
+        }
+        if guarantee { r += 20 }
+        if sanctions { r -= 35 }
+        if state.claims.contains(where: { ($0.claimant == a && $0.target == b) || ($0.claimant == b && $0.target == a) }) {
+            r -= 30
+        }
+        if (aInNato && bInCsto) || (aInCsto && bInNato) { r -= 25 }
+        for war in state.wars where war.isActive {
+            if (war.attackers.contains(a) && war.defenders.contains(b)) || (war.attackers.contains(b) && war.defenders.contains(a)) {
+                r -= 100
+                break
+            }
+        }
         r += regimeAffinity(a, b)
         return r.clamped(-100, 100)
     }

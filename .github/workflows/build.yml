@@ -29,7 +29,7 @@ jobs:
           set -o pipefail
           xcodebuild -project Monde2026.xcodeproj -scheme Monde2026 \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -configuration Debug -derivedDataPath build \
+            -configuration Release -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log || true
           grep -E "error:|BUILD SUCCEEDED|BUILD FAILED" build.log | sort -u | head -300 > errors.txt || true
           if grep -q "BUILD SUCCEEDED" build.log; then echo "OK" > status.txt; else echo "ECHEC" > status.txt; fi
@@ -41,7 +41,7 @@ jobs:
         run: |
           mkdir -p /tmp/out
           if ! grep -q OK status.txt; then echo "pas de test : compilation échouée" > /tmp/out/run.txt; exit 0; fi
-          APP="build/Build/Products/Debug-iphonesimulator/Monde 2026.app"
+          APP="build/Build/Products/Release-iphonesimulator/Monde 2026.app"
           BUNDLE=com.brrrr999.monde2026
           UDID=$(xcrun simctl list devices available -j | python3 -c "
           import sys, json

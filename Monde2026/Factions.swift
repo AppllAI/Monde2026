@@ -36,6 +36,9 @@ extension Simulation {
             return e
         }
         e.add("Abandon d'une partie de sa souveraineté", -20)
+        if let mine = state.countries[x], let lead = state.countries[leader], mine.gdp > lead.gdp * 0.4 || mine.nuclearWarheads > 200 {
+            e.add("Grande puissance indépendante", -80)
+        }
         e.add("Relations avec \(name(leader))", relation(x, leader) * 0.5)
         let average = bloc.members.reduce(0.0) { $0 + relation(x, $1) } / Double(max(1, bloc.members.count))
         e.add("Relations avec les membres", average * 0.2)

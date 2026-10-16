@@ -414,7 +414,7 @@ extension Simulation {
             // Guerre d'usure si les forces sont proches, percée rapide si l'écart est énorme.
             let intensity = pow(tanh(abs(net) / 2), 3)
             let noise = Double.random(in: 0.85...1.15, using: &state.rng)
-            let step = 0.03 * intensity * noise
+            let step = 0.004 * intensity * noise
             if net > 0 {
                 if bHoldsA > 0 {
                     reduceOccupation(of: f.a, by: f.b, amount: step * territorySpeed(A))
