@@ -21,7 +21,7 @@ struct InspectorCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(country?.name ?? province?.0.countryName ?? id)
                             .font(Theme.title(21)).foregroundStyle(Theme.paper)
-                        if let info = province {
+                        if let info = province, info.1.status != .core || (ProvinceMap.byCountry[info.0.country]?.count ?? 0) > 1 {
                             Text(regionLine(info.0, info.1, sim))
                                 .font(Theme.small)
                                 .foregroundStyle(info.1.status == .core || info.1.status == .neutral ? Theme.steel : Theme.coral)

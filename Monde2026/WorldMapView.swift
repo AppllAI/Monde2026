@@ -312,15 +312,11 @@ struct WorldMapView: UIViewRepresentable, Equatable {
         if coordinator.satellite != satellite || coordinator.configured == false {
             coordinator.satellite = satellite
             coordinator.configured = true
-            if satellite {
-                map.preferredConfiguration = MKImageryMapConfiguration(elevationStyle: .flat)
-            } else {
-                let config = MKStandardMapConfiguration(elevationStyle: .flat, emphasisStyle: .muted)
-                config.pointOfInterestFilter = .excludingAll
-                config.showsTraffic = false
-                map.preferredConfiguration = config
-            }
+            // Fond satellite sans aucun nom : en mode normal, la carte du jeu le recouvre entièrement
+            // (océans compris), comme dans un jeu de grande stratégie.
+            map.preferredConfiguration = MKImageryMapConfiguration(elevationStyle: .flat)
             coordinator.renderer?.fillAlpha = satellite ? 0.55 : 1.0
+            coordinator.renderer?.drawsOcean = !satellite
             coordinator.renderer?.setNeedsDisplay()
         }
         if let focus = focus, focus.id != coordinator.lastFocusID {
@@ -343,6 +339,9 @@ final class ProvinceRenderer: MKOverlayRenderer {
     private let lock = NSLock()
     private var snapshot = MapSnapshot.empty
     var fillAlpha: CGFloat = 1.0
+    var drawsOcean = true
+    private static let ocean = UIColor(red: 0.07, green: 0.13, blue: 0.21, alpha: 1)
+    private static let coast = UIColor(red: 0.03, green: 0.05, blue: 0.08, alpha: 0.9)
 
     func update(_ newSnapshot: MapSnapshot) {
         lock.lock()
@@ -362,6 +361,10 @@ final class ProvinceRenderer: MKOverlayRenderer {
         let area = mapRect.insetBy(dx: -margin, dy: -margin)
         let detailed = zoomScale > 1.0 / 4096        // zoom suffisant pour les détails
 
+        if drawsOcean {
+            context.setFillColor(ProvinceRenderer.ocean.cgColor)
+            context.fill(rect(for: mapRect))
+        }
         context.setAlpha(fillAlpha)
         context.beginTransparencyLayer(auxiliaryInfo: nil)
         // 1. Remplissage des régions
@@ -376,6 +379,15 @@ final class ProvinceRenderer: MKOverlayRenderer {
         }
         context.endTransparencyLayer()
         context.setAlpha(1)
+
+        // Côtes : un trait sombre autour de chaque région (les frontières sont redessinées par-dessus).
+        context.setStrokeColor(ProvinceRenderer.coast.cgColor)
+        context.setLineWidth(0.9 * px)
+        context.setLineJoin(.round)
+        for p in provinces where p.bounds.intersects(area) {
+            context.addPath(p.path)
+        }
+        context.strokePath()
 
         // 2. Frontières
         context.setLineJoin(.round)
@@ -550,6 +562,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate {
         if let overlay = overlay as? ProvinceOverlay {
             let r = ProvinceRenderer(overlay: overlay)
             r.fillAlpha = satellite ? 0.55 : 1.0
+            r.drawsOcean = !satellite
             if let snapshot = lastSnapshot { r.update(snapshot) }
             renderer = r
             return r
