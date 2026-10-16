@@ -372,15 +372,16 @@ extension Simulation {
         guard var A = state.countries[f.a], var B = state.countries[f.b] else { return }
 
         // --- Guerre aérienne
-        let airPowerA = A.airPower * airA
-        let airPowerB = B.airPower * airB
+        // La défense antiaérienne au sol (missiles sol-air) conteste la maîtrise du ciel.
+        let airPowerA = A.airPower * airA + A.stock(.missile) * 0.4 * A.tech * airA
+        let airPowerB = B.airPower * airB + B.stock(.missile) * 0.4 * B.tech * airB
         let airSup = airPowerA + airPowerB > 0 ? airPowerA / (airPowerA + airPowerB) : 0.5
         if airPowerA > 0 && airPowerB > 0 {
             A.equipment[.fighter] = max(0, A.stock(.fighter) - A.stock(.fighter) * airA * 0.0008 * (1 - airSup) * 2)
             B.equipment[.fighter] = max(0, B.stock(.fighter) - B.stock(.fighter) * airB * 0.0008 * airSup * 2)
         }
-        let airMultA = 1 + 0.3 * (airSup - 0.5) * 2
-        let airMultB = 1 + 0.3 * (0.5 - airSup) * 2
+        let airMultA = 1 + 0.2 * (airSup - 0.5) * 2
+        let airMultB = 1 + 0.2 * (0.5 - airSup) * 2
 
         // --- Guerre terrestre
         let aCanEnter = canInvade(f.a, f.b, landBorder: f.landBorder)
@@ -401,18 +402,18 @@ extension Simulation {
             let offB = B.offensePower(vsHardness: A.averageHardness) * landB * multB * reachB * B.posture.attack + dronesB * droneValueB
             var defA = A.defensePower(vsHardness: B.averageHardness) * landA * multA * A.posture.defense
             var defB = B.defensePower(vsHardness: A.averageHardness) * landB * multB * B.posture.defense
-            // Celui qui se bat chez lui a l'avantage du terrain.
+            // Celui qui se bat chez lui est retranché (fortifications, lignes courtes, population).
             let aHoldsB = heldFraction(of: f.b, by: f.a)
             let bHoldsA = heldFraction(of: f.a, by: f.b)
-            if aHoldsB > 0.0005 {
-                defB *= 1.2
-            } else if bHoldsA > 0.0005 {
-                defA *= 1.2
+            if bHoldsA > 0.0005 && aHoldsB <= 0.0005 {
+                defA *= 1.5
+            } else {
+                defB *= 1.5
             }
             let eps = 0.01
             let net = log((offA + eps) / (defB + eps)) - log((offB + eps) / (defA + eps))
             // Guerre d'usure si les forces sont proches, percée rapide si l'écart est énorme.
-            let intensity = pow(tanh(abs(net) / 2), 3)
+            let intensity = pow(tanh(abs(net) / 3), 2.5)
             let noise = Double.random(in: 0.85...1.15, using: &state.rng)
             let step = 0.004 * intensity * noise
             if net > 0 {

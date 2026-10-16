@@ -49,6 +49,10 @@ enum SelfTest {
                 log("\(id) PIB \(Int(gdp)) Md$ croiss \(String(format: "%.1f", c.growth * 100))% dette \(Int(c.debt / gdp * 100))% infl \(String(format: "%.1f", c.inflation * 100))% stab \(Int(c.stability * 100)) div \(c.divisionCount) perdu \(Int(sim.lostFraction(id) * 100))%")
             }
             log("guerres : " + sim.activeWarsList.map { $0.name }.joined(separator: " | "))
+            for id in ["RUS", "UKR"] {
+                guard let c = sim.state.countries[id] else { continue }
+                log("  \(id) équip \(Int(c.divisionFill * 100))% mult \(String(format: "%.2f", c.combatMultiplier)) terre \(Int(c.landStrengthIndex)) air \(Int(c.airPower)) missiles \(Int(c.stock(.missile))) drones \(Int(c.stock(.drone))) pertes \(Int(c.casualties))k lassitude \(Int(c.warExhaustion * 100))% posture \(c.posture.name)")
+            }
             log("tension \(Int(sim.state.worldTension)), plans de guerre \(sim.state.warPlans.count), prix pétrole \(String(format: "%.2f", sim.state.prices[.oil] ?? 1))")
         }
         let suspicious = sim.state.countries.values.filter { c in

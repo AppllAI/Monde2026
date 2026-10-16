@@ -196,9 +196,10 @@ struct Simulation {
         let b = projectedBudget(id)
         // Posture : offensive si notre camp domine, défensive s'il est dominé.
         var posture = WarPosture.balanced
+        var sideRatio = 1.0
         if let war = wars(of: id).first, let sides = warSide(of: id, in: war) {
-            let ratio = sidePower(sides.mine) / max(sidePower(sides.enemy), 1)
-            posture = ratio > 1.3 ? .offensive : (ratio < 0.8 ? .defensive : .balanced)
+            sideRatio = sidePower(sides.mine) / max(sidePower(sides.enemy), 1)
+            posture = sideRatio > 1.3 ? .offensive : (sideRatio < 0.8 ? .defensive : .balanced)
         }
         guard var c = state.countries[id] else { return }
 
@@ -220,8 +221,8 @@ struct Simulation {
                 c.conscription = next
                 addEvent("\(c.name) passe à : \(next.name).")
             }
-            // Nouvelles divisions si les existantes sont bien équipées.
-            if c.availableManpower > 24 && c.divisionFill > 0.75 {
+            // Nouvelles divisions si les existantes sont bien équipées et que notre camp ne domine pas déjà.
+            if c.availableManpower > 24 && c.divisionFill > 0.75 && sideRatio < 1.5 {
                 let count = min(10, Int(c.availableManpower * 0.15 / DivisionType.infantry.stats.manpower))
                 if count > 0 {
                     c.activePersonnel += Double(count) * DivisionType.infantry.stats.manpower
