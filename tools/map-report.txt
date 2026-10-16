@@ -1,6 +1,6 @@
-régions 1903, frontières 4545, points 297489, taille 2541195 octets
+régions 1940, frontières 4633, points 299605, taille 2561024 octets
 pays du jeu sans région : 
-pays neutres : AND (Andorre), ATC (Ashmore-et-Cartier), ATG (Antigua-et-Barbuda), BHS (Bahamas), BLZ (Belize), BRB (Barbade), BRN (Brunei), BTN (Bhoutan), COM (Comores), CPV (Cap-Vert), DMA (Dominique), FSM (Micronésie), GMB (Gambie), GNB (Guinée-Bissau), GNQ (Guinée équatoriale), GRD (Grenade), KIR (Kiribati), KNA (Saint-Christophe), LBR (Liberia), LCA (Sainte-Lucie), LIE (Liechtenstein), LSO (Lesotho), MCO (Monaco), MDV (Maldives), MHL (Îles Marshall), MLT (Malte), MUS (Maurice), NRU (Nauru), PCN (Pitcairn), PLW (Palaos), PSX (Palestine), SAH (Sahara occidental), SLB (Îles Salomon), SLE (Sierra Leone), SMR (Saint-Marin), STP (Sao Tomé-et-Principe), SWZ (Eswatini), SYC (Seychelles), TLS (Timor oriental), TON (Tonga), TTO (Trinité-et-Tobago), TUV (Tuvalu), VAT (Vatican), VCT (Saint-Vincent), VUT (Vanuatu), WSM (Samoa)
+pays neutres : AND (Andorre), ATC (Ashmore-et-Cartier), ATG (Antigua-et-Barbuda), BRB (Barbade), COM (Comores), CPV (Cap-Vert), DMA (Dominique), FSM (Micronésie), GRD (Grenade), KIR (Kiribati), KNA (Saint-Christophe), LCA (Sainte-Lucie), LIE (Liechtenstein), MCO (Monaco), MDV (Maldives), MHL (Îles Marshall), MUS (Maurice), NRU (Nauru), PCN (Pitcairn), PLW (Palaos), PSX (Palestine), SAH (Sahara occidental), SLB (Îles Salomon), SMR (Saint-Marin), STP (Sao Tomé-et-Principe), SYC (Seychelles), TON (Tonga), TUV (Tuvalu), VAT (Vatican), VCT (Saint-Vincent), VUT (Vanuatu), WSM (Samoa)
 AFG (20) : Badakhchan | Baghlân | Balkh | Bâdghîs | Bâmiyân | Farâh | Fâryâb | Ghazni | Ghôr | Helmand | Hérât | Kandahâr | Nangarhâr | Nimrôz | Nourestân | Paktîkâ | Sar-é Pol | Takhâr | Wardak | Zabol
 AGO (18) : Bengo | Benguela | Bié | Cabinda | Huambo | Huila | Kunene | Kwando-Kubango | Kwanza-Nord | Kwanza-Sud | Luanda | Lunda-Nord | Lunda-Sud | Malanje | Moxico | Namibe | Uíge | Zaïre
 ALB (4) : Fier | Gjirokastër | Korçë | Shkodër
@@ -20,15 +20,15 @@ BFA (13) : Boucle du Mouhoun | Cascades | Centre-Est | Centre-Nord | Centre-Oues
 BGD (7) : Barisal | Chittagong | Dhaka | Khulna | Rajshahi | Rangpur | Sylhet
 BGR (8) : Blagoevgrad | Bourgas | Dobritch | Pleven | Plovdiv | Sofia | Stara Zagora | Yambol
 BHR (1) : Méridional
-BHS (1) : Bahamas
+BHS (3) : Inagua | North Andros | West Grand Bahama
 BIH (6) : Banja Luka | Bosnie-Herzégovine | Canton d'Herzégovine-Neretva | Canton de Zenica-Doboj | Doboj | Trebinje
 BLR (7) : Brest | Hrodna | Minsk | Minsk | Moguilev | Vitebsk | Voblast de Homiel
-BLZ (1) : Belize
+BLZ (4) : Belize | Cayo | Orange Walk | Toledo
 BOL (9) : Beni | Chuquisaca | Cochabamba | Oruro | Pando | Paz | Potosí | Santa Cruz | Tarija
 BRA (27) : Acre | Alagoas | Amapá | Amazonas | Bahia | Ceará | Espírito Santo | Fédéral | Goiás | Maranhão | Mato Grosso | Mato Grosso do Sul | Minas Gerais | Paraná | Paraíba | Pará | Pernambouc | Piauí | Rio Grande do Norte | Rio Grande do Sul | Rio de Janeiro | Rondônia | Roraima | Santa Catarina | Sergipe | São Paulo | Tocantins
 BRB (1) : Barbade
-BRN (1) : Brunei
-BTN (1) : Bhoutan
+BRN (2) : Belait | Temburong
+BTN (5) : Central | Lhuntse | Samdrup Jongkhar | Southern | Western
 BWA (15) : Central | Francistown | Gaborone | Ghanzi | Jwaneng | Kgalagadi | Kgatleng | Kweneng | Lobatse | Nord-Est | Nord-Ouest | Selebi-Phikwe | Sowa Town | Sud | Sud-Est
 CAF (17) : Bamingui-Bangoran | Bangui | Basse-Kotto | Haut-Mbomou | Haute-Kotto | Kémo | Lobaye | Mambéré-Kadéï | Mbomou | Nana-Grébizi | Nana-Mambéré | Ombella-M'Poko | Ouaka | Ouham | Ouham-Pendé | Sangha-Mbaéré | Vakaga
 CAN (13) : Alberta | Colombie-Britannique | Manitoba | Nouveau-Brunswick | Nouvelle-Écosse | Nunavut | Ontario | Québec | Saskatchewan | Terre-Neuve-et-Labrador | Territoires du Nord-Ouest | Yukon | Île-du-Prince-Édouard
@@ -67,9 +67,9 @@ GBR (14) : Aberdeenshire | Cumbria | Devon | Dumfries and Galloway | East Midlan
 GEO (7) : Abkhazie | Iméréthie | Kakhétie | Kartlie intérieure | Mingrélie-Haute Svanétie | Mtskheta-Mtianeti | Samtskhé-Djavakhétie
 GHA (10) : Ashanti | Brong Ahafo | Centre | Grand Accra | Haut Ghana occidental | Haut Ghana oriental | Nord | Région Occidentale | Région Orientale | Volta
 GIN (12) : Boké | Conakry | Dinguiraye | Faranah | Gaoual | Kankan | Kindia | Kouroussa | Labé | Mamou | Nzérékoré | Siguiri
-GMB (1) : Gambie
-GNB (1) : Guinée-Bissau
-GNQ (1) : Guinée équatoriale
+GMB (3) : Central River | North Bank | West Coast
+GNB (5) : Bafatá | Bissau | Gabu | Norte | Sul
+GNQ (4) : Centro-Sur | Kié-Ntem | Litoral | Wele-Nzas
 GRC (9) : Crète | Grèce-Centrale | Macédoine-Centrale | Macédoine-Occidentale | Macédoine-Orientale-et-Thrace | Péloponnèse | Thessalie | Égée-Méridionale | Épire
 GRD (1) : Grenade
 GTM (8) : Alta Verapaz | Baja Verapaz | Escuintla | Huehuetenango | Izabal | Petén | San Marcos | Suchitepéquez
@@ -99,12 +99,12 @@ KOR (8) : Chungcheong du Nord | Chungcheong du Sud | Gangwon | Gyeonggi | Gyeong
 KWT (3) : Al Ahmadi | Al Farwaniyah | Al Jahra
 LAO (12) : Attapeu | Borikhamxay | Champassak | Houaphan | Khammouane | Luang Namtha | Luang Prabang | Phongsaly | Savannakhet | Sayaboury | Vientiane | Xieng Khouang
 LBN (3) : Bekaa | Mont-Liban | Nabatieh
-LBR (1) : Liberia
+LBR (8) : Gbarpolu | Grand Bassa | Grand Cape Mount | Grand Gedeh | Lofa | Nimba | River Gee | Sinoe
 LBY (22) : Ajdabiya | Al Boutnan | Al Djfara | Al Djoufrah | Al Jabal al Akhdar | Al Marj | Al Mourqoub | Al-Koufrah | An Nouqat al Khams | Ash-Sharqiyah | Az Zaouiyah | Benghazi | Ghadamès | Ghat | Gubba | Misratah | Mizdah | Mourzouq | Sebha | Syrte | Tajura' wa an Nawahi al Arba | Wadi al Hayaat
 LCA (1) : Sainte-Lucie
 LIE (1) : Liechtenstein
 LKA (6) : Kurunegala | Moneragala | Næ̆gĕnahira paḷāta | Ratnapura | Uturu paḷāta | Uturumæ̆da paḷāta
-LSO (1) : Lesotho
+LSO (4) : Maseru | Mohale's Hoek | Mokhotlong | Thaba-Tseka
 LTU (6) : Alytus | Kaunas | Klaipėda | Panevėžys | Vilnius | Šiauliai
 LUX (1) : Diekirch
 LVA (6) : Latgale | Riga | Saldus | Ventspils | Vidzeme | Zemgale
@@ -117,7 +117,7 @@ MEX (26) : Basse-Californie | Basse-Californie du Sud | Campeche | Chiapas | Chi
 MHL (1) : Îles Marshall
 MKD (4) : Chtip | Kavadarci | Makedonski Brod | Prilep
 MLI (9) : Bamako | Gao | Kayes | Kidal | Koulikoro | Mopti | Ségou | Tombouctou | Wassoulou
-MLT (1) : Malte
+MLT (1) : Mellieħa
 MMR (14) : Arakan | Ayeyarwady | Bago | Chin | Kachin | Karen | Kayah | Magway | Mandalay | Môn | Sagaing | Shan | Tanintharyi | Yangon
 MNE (3) : Nikšić | Pljevlja | Plužine
 MNG (22) : Arkhangai | Bayan-Ölgii | Bayankhongor | Bulgan | Darhan-Uul | Dornod | Dornogovi | Dundgovi | Govi-Altai | Govisümber | Khentii | Khovd | Khövsgöl | Orkhon | Oulan-Bator | Selenge | Sühbaatar | Töv | Uvs | Zavkhan | Ömnögovi | Övörkhangai
@@ -158,7 +158,7 @@ SDN (17) : Al Jazirah | Al Qadarif | Darfour du Nord | Darfour du Sud | Darfour-
 SEN (11) : Fatick | Kaffrine | Kolda | Kédougou | Louga | Matam | Saint-Louis | Sédhiou | Tambacounda | Thiès | Ziguinchor
 SGP (1) : Sud-Ouest
 SLB (1) : Îles Salomon
-SLE (1) : Sierra Leone
+SLE (4) : Est | Nord | Sud | Zone de l'Ouest
 SLV (4) : Chalatenango | San Miguel | San Vicente | Santa Ana
 SMR (1) : Saint-Marin
 SOM (14) : Bakool | Banaadir | Bari | Bay | Galguduud | Gedo | Hiiraan | Jubbada Dhexe | Jubbada Hoose | Mudug | Nugaal | Shabeellaha Dhexe | Shabeellaha Hoose | Somaliland
@@ -169,7 +169,7 @@ SUR (10) : Brokopondo | Commewijne | Coronie | Marowijne | Nickerie | Para | Par
 SVK (6) : Banská Bystrica | Košice | Nitra | Prešov | Trnava | Žilina
 SVN (4) : Kočevje | Krško | Slovenska Bistrica | Tolmin
 SWE (17) : Dalécarlie | Gävleborg | Jämtland | Jönköping | Kalmar | Kronoberg | Norrbotten | Scanie | Stockholm | Uppsala | Värmland | Västerbotten | Västernorrland | Västmanland | Västra Götaland | Örebro | Östergötland
-SWZ (1) : Eswatini
+SWZ (3) : Lubombo | Manzini | Shiselweni
 SYC (1) : Seychelles
 SYR (11) : Alep | Deir ez-Zor | Hama | Hassaké | Homs | Idleb | Lattaquié | Qouneitra | Racca | Rif Dimachq | Suweyda
 TCD (22) : Barh El Gazel | Batha | Borkou | Chari-Baguirmi | Ennedi | Guéra | Hadjer-Lamis | Kanem | Lac | Logone Occidental | Logone Oriental | Mandoul | Mayo-Kebbi Est | Mayo-Kebbi Ouest | Moyen-Chari | N'Djaména | Ouaddaï | Salamat | Sila | Tandjilé | Tibesti | Wadi Fira
@@ -177,9 +177,9 @@ TGO (5) : Centre | Kara | Région des Savanes | Région des plateaux | Région m
 THA (18) : Chiang Mai | Eastern | Kalasin | Kanchanaburi | Khon Kaen | Lampang | Nakhon Ratchasima | Nakhon Si Thammarat | Nan | Phetchabun | Phitsanulok | Prachuap Khiri Khan | Sakon Nakhon | Si Sa Ket | Surat Thani | Ubon Ratchathani | Udon Thani | Uthai Thani
 TJK (5) : Douchanbé | Haut-Badakhchan | Khatlon | Khodjent | Nohiyahoi tobei Jumhurii
 TKM (5) : Ahal | Balkan | Daşoguz | Lebap | Mary
-TLS (1) : Timor oriental
+TLS (3) : Bobonaro | Lautém | Viqueque
 TON (1) : Tonga
-TTO (1) : Trinité-et-Tobago
+TTO (2) : Couva-Tabaquite-Talparo | Sangre Grande
 TUN (10) : Béja | Gabès | Gafsa | Kairouan | Kasserine | Kef | Kébili | Médenine | Nabeul | Tataouine
 TUR (20) : Afyonkarahisar | Ankara | Antalya | Ağrı | Balıkesir | Bolu | Denizli | Elâzığ | Erzincan | Erzurum | Kahramanmaraş | Kastamonu | Kayseri | Konya | Manisa | Mersin | Sivas | Tekirdağ | Van | Şanlıurfa
 TUV (1) : Tuvalu
