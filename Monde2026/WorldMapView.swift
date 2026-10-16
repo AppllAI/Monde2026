@@ -512,13 +512,13 @@ final class ProvinceRenderer: MKOverlayRenderer {
         if label.isCountry {
             textColor = label.highlighted ? UIColor(Theme.amber) : UIColor.white.withAlphaComponent(0.92)
         } else {
-            textColor = label.highlighted ? UIColor(Theme.amber) : UIColor.white.withAlphaComponent(0.7)
+            textColor = label.highlighted ? UIColor(Theme.amber) : UIColor.white.withAlphaComponent(0.82)
         }
         let kern: CGFloat = label.isCountry ? 2.5 : 0.5
         let outline: [NSAttributedString.Key: Any] = [
             .font: font, .kern: kern,
-            .strokeColor: UIColor.black.withAlphaComponent(label.isCountry ? 0.75 : 0.6),
-            .strokeWidth: 9.0, .foregroundColor: UIColor.clear
+            .strokeColor: UIColor.black.withAlphaComponent(label.isCountry ? 0.75 : 0.35),
+            .strokeWidth: label.isCountry ? 9.0 : 4.0, .foregroundColor: UIColor.clear
         ]
         let fill: [NSAttributedString.Key: Any] = [.font: font, .kern: kern, .foregroundColor: textColor]
         let text = label.text as NSString
