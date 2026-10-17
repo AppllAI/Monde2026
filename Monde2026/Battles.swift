@@ -650,6 +650,10 @@ extension Simulation {
             addD("Armées : ravitaillement, généraux, posture", 1 + (armyFactor - 1) * share)
         }
         if ProvinceMap.all[target].country == defenderCountry { addD("Défendre sa terre", 1.25) }
+        // Armées plaquées contre la frontière d'où vient l'attaque : la ligne est tenue.
+        let fromFronts = Set(attArmies.map { $0.province })
+        let holding = defArmies.filter { $0.facing.map { fromFronts.contains($0) } ?? false }.reduce(0) { $0 + $1.count }
+        if holding > 0 && defDivisions > 0 { addD("Ligne tenue", 1 + 0.12 * Double(holding) / Double(defDivisions)) }
         if terrain == .urban { addD("Ville", 1.15) }
         let fort = fortLevel(target)
         if fort > 0 { addD("Fort niveau \(fort)", 1 + 0.15 * Double(fort)) }

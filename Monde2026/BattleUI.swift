@@ -84,7 +84,7 @@ struct ArmyCard: View {
                     }
                     Text(store.waypointMode
                          ? "Mode étapes : chaque région touchée s'ajoute au trajet."
-                         : "Touchez une région pour y aller. Maintenez ✋ (à gauche) et touchez plusieurs régions pour tracer un détour.")
+                         : "Faites glisser le pion jusqu'à une région — contre une frontière pour la tenir. Ou touchez une région. ✋ à gauche : trajet par étapes.")
                         .font(.system(size: 11)).foregroundStyle(store.waypointMode ? Theme.amber : Theme.steel).lineLimit(2)
                 } else {
                     GeneralRow(general: a.general)

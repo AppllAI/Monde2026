@@ -18,9 +18,10 @@ struct GameView: View {
         GeometryReader { geo in
             let wide = geo.size.width > 700
             ZStack(alignment: .trailing) {
-                WorldMapView(snapshot: store.mapSnapshot, satellite: store.satellite, focus: store.focus) { tap in
-                    store.handleTap(tap)
-                }
+                WorldMapView(snapshot: store.mapSnapshot, units: store.unitsSnapshot, unitAnimation: store.unitAnimation,
+                             satellite: store.satellite, focus: store.focus,
+                             onTap: { tap in store.handleTap(tap) },
+                             onDrop: { id, province, facing in store.dropArmy(id, at: province, facing: facing) })
                 .equatable()
                 .ignoresSafeArea()
                 VStack(spacing: 10) {

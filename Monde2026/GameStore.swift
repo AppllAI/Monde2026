@@ -113,6 +113,8 @@ final class GameStore: ObservableObject {
         didSet { refreshMap() }
     }
     @Published private(set) var mapSnapshot = MapSnapshot.empty
+    @Published private(set) var unitsSnapshot = UnitsSnapshot.empty
+    private var territorySignature = 0
     @Published var selectedProvince: Int?
     @Published var selectedCountry: CountryID?
     @Published var selectedArmy: Int?
@@ -190,10 +192,12 @@ final class GameStore: ObservableObject {
         sim!.advance(days: days)
         version += 1
         // La carte ne se redessine que tous les 5 jours (et au changement de mois) : c'est ce qui garde la fluidité.
-        let after = sim!.state.day
-        let armiesActive = sim!.state.armies.contains { !$0.path.isEmpty }
-        if after / 5 != before / 5 || Simulation.calendar.component(.day, from: sim!.currentDate) == 1
-            || (armiesActive && after / 2 != before / 2) {
+        _ = before
+        // Les unités bougent à chaque jour (léger) ; la carte des régions seulement si le territoire change.
+        refreshUnits()
+        let signature = territoryHash()
+        if signature != territorySignature || Simulation.calendar.component(.day, from: sim!.currentDate) == 1 {
+            territorySignature = signature
             refreshMap()
         }
         if let id = selectedArmy, !(sim!.state.armies.contains { $0.id == id }) {
@@ -263,8 +267,9 @@ final class GameStore: ObservableObject {
     }
 
     /// Action diplomatique avec message de retour.
-    func perform(_ body: (inout Simulation, CountryID) -> ActionResult) {
-        guard sim != nil, let p = playerID else { return }
+    @discardableResult
+    func perform(_ body: (inout Simulation, CountryID) -> ActionResult) -> ActionResult {
+        guard sim != nil, let p = playerID else { return ActionResult(success: false, message: "") }
         let result = body(&sim!, p)
         feedback = result.message.isEmpty ? nil : result.message
         version += 1
@@ -274,6 +279,7 @@ final class GameStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 3_500_000_000)
             if self?.feedback == result.message { self?.feedback = nil }
         }
+        return result
     }
 
     /// Choisir la région d'un nouveau bâtiment : le panneau se ferme, les régions possibles s'allument.
@@ -290,7 +296,56 @@ final class GameStore: ObservableObject {
 
     // MARK: - Carte
 
+    /// Durée du glissement des pions : celle d'un jour de jeu à la vitesse choisie.
+    var unitAnimation: TimeInterval {
+        switch speed {
+        case 1: return 0.65
+        case 2: return 0.24
+        case 3: return 0.09
+        default: return 0.3
+        }
+    }
+
+    func refreshUnits() {
+        guard let s = sim else { unitsSnapshot = .empty; return }
+        unitsSnapshot = UnitsBuilder.build(s, selectedArmy: selectedArmy, group: armyGroup)
+    }
+
+    /// Empreinte de ce qui change la couleur des régions (contrôle, guerres, traités, chantiers).
+    private func territoryHash() -> Int {
+        guard let s = sim else { return 0 }
+        var h = Hasher()
+        h.combine(s.state.control.count)
+        for (k, v) in s.state.control.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        h.combine(s.state.wars.filter { $0.isActive }.count)
+        h.combine(s.state.treaties.count)
+        h.combine(s.state.constructions.count)
+        h.combine(s.state.forts.count)
+        h.combine(s.state.bases.count)
+        h.combine(s.state.complexes.count)
+        h.combine(s.state.warPlans.count)
+        return h.finalize()
+    }
+
+    /// Pion déposé du doigt sur une région (et peut-être contre une frontière).
+    func dropArmy(_ id: Int, at province: Int, facing: Int?) {
+        let ids = (selectedArmy == id ? [id] + armyGroup.sorted() : [id])
+        perform { sim, _ in
+            var last = ActionResult(success: false, message: "")
+            var ok = 0
+            for a in ids {
+                let r = sim.orderArmy(a, to: province, facing: facing)
+                if r.success { ok += 1; last = r } else if ok == 0 { last = r }
+            }
+            return ids.count > 1 && ok > 1 ? ActionResult(success: true, message: "\(ok) armées en route.") : last
+        }
+        selectedArmy = nil
+        armyGroup = []
+        refreshUnits()
+    }
+
     func refreshMap() {
+        refreshUnits()
         guard let s = sim else {
             mapSnapshot = .empty
             return
@@ -362,7 +417,13 @@ final class GameStore: ObservableObject {
             return
         }
         if ids.count == 1 {
-            perform { sim, _ in sim.orderArmy(lead, to: province) }
+            let r = perform { sim, _ in sim.orderArmy(lead, to: province) }
+            // L'ordre est donné : l'armée se désélectionne (le trajet reste visible).
+            if r.success {
+                selectedArmy = nil
+                armyGroup = []
+                refreshUnits()
+            }
             return
         }
         perform { sim, _ in
@@ -375,6 +436,9 @@ final class GameStore: ObservableObject {
             if ok == 0 { return last }
             return ActionResult(success: true, message: "\(ok) armées en route vers \(ProvinceMap.all[province].name).")
         }
+        selectedArmy = nil
+        armyGroup = []
+        refreshUnits()
     }
 
     /// Sélectionne en plus les armées voisines (même région ou régions adjacentes).

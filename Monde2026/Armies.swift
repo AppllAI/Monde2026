@@ -34,6 +34,7 @@ struct Army: Codable, Identifiable {
     var covert: Bool = false           // envoyé en secret (volontaires « non officiels »)
     var airdrop: Bool = false          // parachutage en cours
     var cutDays: Int = 0               // jours d'encerclement (reddition au bout d'un moment)
+    var facing: Int? = nil             // région voisine dont l'armée tient la frontière
 
     /// Le camp pour lequel l'armée se bat.
     var side: CountryID { servingFor ?? owner }
@@ -421,9 +422,19 @@ extension Simulation {
         return homeProvince(for: id)
     }
 
-    mutating func orderArmy(_ armyID: Int, to target: Int) -> ActionResult {
+    mutating func orderArmy(_ armyID: Int, to target: Int, facing: Int? = nil) -> ActionResult {
         guard let i = state.armies.firstIndex(where: { $0.id == armyID }) else {
             return ActionResult(success: false, message: "Armée introuvable.")
+        }
+        let validFacing = facing.flatMap { ProvinceMap.all[target].neighbors.contains($0) ? $0 : nil }
+        // Même région : l'armée se plaque contre la frontière choisie.
+        if target == state.armies[i].province {
+            guard let f = validFacing else { return ActionResult(success: false, message: "L'armée est déjà là.") }
+            state.armies[i].facing = f
+            state.armies[i].path = []
+            state.armies[i].engaged = false
+            state.armies[i].training = false
+            return ActionResult(success: true, message: "\(state.armies[i].name) tient la frontière face à \(ProvinceMap.all[f].name).")
         }
         let offensive = enemies(of: state.armies[i].owner).contains(controller(of: target))
         guard let r = route(for: state.armies[i], to: target, throughEnemy: offensive) else {
@@ -438,7 +449,11 @@ extension Simulation {
         state.armies[i].progress = 0
         state.armies[i].engaged = false
         state.armies[i].training = false
+        state.armies[i].facing = offensive ? nil : validFacing
         let dest = ProvinceMap.all[target].name
+        if let f = state.armies[i].facing, !offensive {
+            return ActionResult(success: true, message: "En route vers \(dest), pour tenir la frontière face à \(ProvinceMap.all[f].name).")
+        }
         let foes = enemies(of: state.armies[i].owner)
         let hostile = r.path.filter { foes.contains(controller(of: $0)) }.count
         if r.amphibious { return ActionResult(success: true, message: "Débarquement ordonné vers \(dest).") }
@@ -465,6 +480,7 @@ extension Simulation {
         }
         state.armies[i].path += r.path
         state.armies[i].training = false
+        state.armies[i].facing = nil
         return ActionResult(success: true, message: "Étape ajoutée : \(ProvinceMap.all[target].name) (\(state.armies[i].path.count) régions au total).")
     }
 
@@ -488,6 +504,7 @@ extension Simulation {
             state.armies[i].training = !atWar
             state.armies[i].stance = atWar ? .balanced : .defend
             state.armies[i].daysInPlace = 60
+            if atWar { faceEnemy(i) }
         }
     }
 
@@ -801,6 +818,7 @@ extension Simulation {
         }
         for i in state.armies.indices {
             state.armies[i].daysInPlace = 90
+            faceEnemy(i)
         }
     }
 
@@ -915,9 +933,10 @@ extension Simulation {
             }
         }
         rebalanceDefense(id, front: front, foes: foes)
-        // Les armées qui n'attaquent pas se mettent en défense (sauf doctrine offensive).
+        // Les armées qui n'attaquent pas se mettent en défense (sauf doctrine offensive), face à l'ennemi.
         for i in state.armies.indices where state.armies[i].owner == id && state.armies[i].path.isEmpty {
             state.armies[i].stance = c.posture == .offensive && state.armies[i].organization > 0.8 ? .balanced : .defend
+            faceEnemy(i)
         }
     }
 
@@ -948,6 +967,22 @@ extension Simulation {
             state.armies[i].path = r.path
             pressure[target] = value * 0.5
         }
+    }
+
+    /// Plaque l'armée contre la frontière ennemie la plus menaçante de sa région.
+    mutating func faceEnemy(_ i: Int) {
+        let a = state.armies[i]
+        let foes = enemies(of: a.side)
+        let enemyNeighbors = ProvinceMap.all[a.province].neighbors.filter { foes.contains(controller(of: $0)) }
+        guard !enemyNeighbors.isEmpty else {
+            if let f = a.facing, !foes.contains(controller(of: f)) && controller(of: f) != a.side { state.armies[i].facing = nil }
+            return
+        }
+        if let f = a.facing, enemyNeighbors.contains(f) { return }
+        let best = enemyNeighbors.max { x, y in
+            state.armies.filter { $0.province == x }.reduce(0) { $0 + $1.count } < state.armies.filter { $0.province == y }.reduce(0) { $0 + $1.count }
+        }
+        state.armies[i].facing = best
     }
 
     private func nearestEnemyProvince(from province: Int, owner: CountryID) -> Int? {
