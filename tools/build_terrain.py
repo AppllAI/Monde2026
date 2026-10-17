@@ -169,7 +169,7 @@ for i, r in enumerate(regions):
     alat = abs(lat)
     if (density > 900 and area < 25000) or (pop > 3_000_000 and area < 9000):
         t = URBAN
-    elif mtn >= 0.40:
+    elif mtn >= 0.55:
         t = MOUNTAIN
     elif des >= 0.40 or (des >= 0.2 and 15 <= alat <= 35):
         t = DESERT
@@ -177,11 +177,11 @@ for i, r in enumerate(regions):
         t = TUNDRA
     elif wet >= 0.35:
         t = JUNGLE
-    elif mtn >= 0.15 or pla >= 0.45 or hil >= 0.4:
+    elif mtn >= 0.2 or pla >= 0.5 or hil >= 0.4:
         t = HILLS
     elif alat < 12:
         t = JUNGLE
-    elif 52 <= alat < 66:
+    elif 54 <= alat < 66:
         t = FOREST
     elif not trees and 15 <= alat <= 32:
         t = DESERT

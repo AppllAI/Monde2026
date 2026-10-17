@@ -38,6 +38,7 @@ enum SelfTest {
         let start = Date()
         var sim = Simulation(playerID: "FRA", difficulty: .normal)
         log("init \(String(format: "%.2f", Date().timeIntervalSince(start))) s, \(sim.state.countries.count) pays, \(ProvinceMap.all.count) régions")
+        log("terrain réel : \(TerrainMap.hasRealData), " + Terrain.allCases.map { t in "\(t.name) \(ProvinceMap.all.filter { TerrainMap.terrain($0.id) == t }.count)" }.joined(separator: ", "))
         let owners = sim.provinceOwners()
         log("régions attribuées : \(owners.count)")
         let bad = ProvinceMap.all.filter { $0.rings.isEmpty }.count
@@ -59,6 +60,12 @@ enum SelfTest {
             let uaFront = probe.frontierProvinces("UKR", enemies: ["RUS"])
             let covered = uaFront.filter { p in ua.contains { $0.province == p } }.count
             log("mois \(month) : UKR perd \(lost.count) [\(names)]")
+            let bs = Array(probe.state.battles.values)
+            let tactics = Dictionary(grouping: bs.flatMap { [$0.attackerTactic.name, $0.defenderTactic.name] }, by: { $0 }).mapValues { $0.count }
+            let cut = probe.state.armies.filter { $0.supply < 0.4 }.count
+            let skills = probe.state.armies.map { $0.general.skill }
+            log("   batailles \(bs.count) (\(bs.map { "\(ProvinceMap.all[$0.province].name) \(Int($0.balance * 100))%" }.prefix(6).joined(separator: ", "))) ; météo Donetsk \(probe.weather(at: lost.first ?? 0).name)")
+            log("   tactiques : \(tactics.sorted { $0.value > $1.value }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")) ; armées mal ravitaillées \(cut) ; niveau moyen des généraux \(String(format: "%.2f", Double(skills.reduce(0, +)) / Double(max(1, skills.count))))")
             log("   RUS \(ru.count) armées / \(ruDiv) div / org \(Int(ruOrg * 100)) % ; UKR \(ua.count) armées / \(uaDiv) div / org \(Int(uaOrg * 100)) % ; garnison UKR \(probe.unassignedCount("UKR")) ; front UKR \(covered)/\(uaFront.count) régions tenues par une armée")
         }
 

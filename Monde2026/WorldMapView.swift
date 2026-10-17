@@ -79,6 +79,25 @@ struct ArmyMarker: Equatable, Identifiable {
 struct ArmyRoute: Equatable {
     let points: [CGPoint]
     let selected: Bool
+    var hostileFrom: Int? = nil      // segment à partir duquel on entre en territoire ennemi
+}
+
+/// Bataille en cours sur la carte.
+struct BattleMarker: Equatable, Identifiable {
+    let id: Int                      // région disputée
+    let x: Double
+    let y: Double
+    let balance: Double              // part de l'attaquant
+    let attackerColor: RGBA
+    let defenderColor: RGBA
+    let side: Int                    // 1 le joueur attaque, -1 il défend, 0 non concerné
+}
+
+/// Ce que l'on a touché sur la carte.
+enum MapTap {
+    case point(GeoPoint)
+    case army(Int)
+    case battle(Int)
 }
 
 struct MapSnapshot: Equatable {
@@ -89,6 +108,7 @@ struct MapSnapshot: Equatable {
     var selectedProvince: Int?
     var armies: [ArmyMarker] = []
     var routes: [ArmyRoute] = []
+    var battles: [BattleMarker] = []
 
     static let empty = MapSnapshot(fills: [], borders: [], labels: [], plans: [], selectedProvince: nil)
 }
@@ -96,7 +116,7 @@ struct MapSnapshot: Equatable {
 enum MapSnapshotBuilder {
 
     static func build(_ sim: Simulation, mode: MapMode, selected: CountryID?, selectedProvince: Int?,
-                      selectedArmy: Int? = nil) -> MapSnapshot {
+                      selectedArmy: Int? = nil, group: Set<Int> = []) -> MapSnapshot {
         let provinces = ProvinceMap.all
         guard !provinces.isEmpty else { return .empty }
         let owners = sim.provinceOwners()
@@ -128,6 +148,9 @@ enum MapSnapshotBuilder {
                 let holder = info.owner ?? p.country
                 fills.append(ProvinceFill(color: RGBA(color(holder)),
                                           stripes: RGBA(color(p.country), alpha: 0.85)))
+            case .core where mode == .terrain, .annexed where mode == .terrain:
+                let t = TerrainMap.terrain(p.id).rgb
+                fills.append(ProvinceFill(color: RGBA(UIColor(red: t.0, green: t.1, blue: t.2, alpha: 1)), stripes: nil))
             case .core, .annexed:
                 var base = color(info.owner ?? p.country)
                 if let s = selected, info.owner == s {
@@ -253,20 +276,32 @@ enum MapSnapshotBuilder {
             let isPlayer = a.owner == player
             markers.append(ArmyMarker(id: a.id, x: lp.x, y: lp.y, slot: slot, text: "\(a.count)", flag: Geo.flag(a.owner),
                                       color: RGBA(Theme.politicalColor(a.owner)), isPlayer: isPlayer,
-                                      selected: a.id == selectedArmy, engaged: a.engaged))
+                                      selected: a.id == selectedArmy || group.contains(a.id), engaged: a.engaged))
             if isPlayer && !a.path.isEmpty {
                 var pts = [CGPoint(x: lp.x, y: lp.y)]
-                for p in a.path {
+                var hostile: Int?
+                let foes = enemies(a.owner)
+                for (k, p) in a.path.enumerated() {
                     let q = provinces[p].labelPoint
                     pts.append(CGPoint(x: q.x, y: q.y))
+                    if hostile == nil && foes.contains(sim.controller(of: p)) { hostile = k }
                 }
-                routes.append(ArmyRoute(points: pts, selected: a.id == selectedArmy))
+                routes.append(ArmyRoute(points: pts, selected: a.id == selectedArmy || group.contains(a.id), hostileFrom: hostile))
             }
+        }
+        var battleMarkers: [BattleMarker] = []
+        for b in sim.state.battles.values.sorted(by: { $0.province < $1.province }) {
+            let lp = provinces[b.province].labelPoint
+            battleMarkers.append(BattleMarker(id: b.province, x: lp.x, y: lp.y, balance: b.balance,
+                                              attackerColor: RGBA(Theme.politicalColor(b.attacker)),
+                                              defenderColor: RGBA(Theme.politicalColor(b.defender)),
+                                              side: sim.playerSide(in: b)))
         }
         var snap = MapSnapshot(fills: fills, borders: borders, labels: labels, plans: plans,
                                selectedProvince: selectedProvince)
         snap.armies = markers
         snap.routes = routes
+        snap.battles = battleMarkers
         return snap
     }
 
@@ -290,6 +325,8 @@ enum MapSnapshotBuilder {
         case .military:
             if sim.isAtWar(id) { return UIColor(Theme.coral) }
             return UIColor(Theme.blend(Theme.steel, Theme.amber, min(1, sim.militaryPower(id) / 6000)))
+        case .terrain:
+            return Theme.politicalColor(id)
         }
     }
 }
@@ -322,7 +359,7 @@ struct WorldMapView: UIViewRepresentable, Equatable {
     let snapshot: MapSnapshot
     let satellite: Bool
     let focus: MapFocus?
-    let onTap: (GeoPoint) -> Void
+    let onTap: (MapTap) -> Void
 
     static func == (lhs: WorldMapView, rhs: WorldMapView) -> Bool {
         lhs.snapshot == rhs.snapshot && lhs.satellite == rhs.satellite && lhs.focus == rhs.focus
@@ -494,14 +531,39 @@ final class ProvinceRenderer: MKOverlayRenderer {
 
         // 5. Trajets des armées du joueur
         for route in snap.routes where route.points.count >= 2 {
-            context.setStrokeColor(UIColor(Theme.amber).withAlphaComponent(route.selected ? 1 : 0.6).cgColor)
-            context.setLineWidth((route.selected ? 3 : 2) * px)
+            let alpha: CGFloat = route.selected ? 1 : 0.6
+            let split = min(route.points.count - 1, route.hostileFrom ?? route.points.count - 1)
+            context.setLineWidth((route.selected ? 3.2 : 2) * px)
             context.setLineDash(phase: 0, lengths: [8 * px, 5 * px])
-            context.move(to: route.points[0])
-            for p in route.points.dropFirst() { context.addLine(to: p) }
-            context.strokePath()
+            if split > 0 {
+                context.setStrokeColor(UIColor(Theme.amber).withAlphaComponent(alpha).cgColor)
+                context.move(to: route.points[0])
+                for p in route.points[1...split] { context.addLine(to: p) }
+                context.strokePath()
+            }
+            if route.hostileFrom != nil {
+                // En territoire ennemi : trait rouge plein, plus épais (axe d'offensive).
+                context.setLineDash(phase: 0, lengths: [])
+                context.setStrokeColor(UIColor(Theme.coral).withAlphaComponent(alpha).cgColor)
+                context.setLineWidth((route.selected ? 4.5 : 3) * px)
+                context.move(to: route.points[split])
+                for p in route.points[(split + 1)...] { context.addLine(to: p) }
+                context.strokePath()
+                // Pointe de flèche
+                if route.points.count >= 2 {
+                    let a = route.points[route.points.count - 2], b = route.points[route.points.count - 1]
+                    let ang = atan2(b.y - a.y, b.x - a.x)
+                    let len = 14 * px
+                    context.setFillColor(UIColor(Theme.coral).withAlphaComponent(alpha).cgColor)
+                    context.move(to: b)
+                    context.addLine(to: CGPoint(x: b.x - len * cos(ang - 0.45), y: b.y - len * sin(ang - 0.45)))
+                    context.addLine(to: CGPoint(x: b.x - len * cos(ang + 0.45), y: b.y - len * sin(ang + 0.45)))
+                    context.closePath()
+                    context.fillPath()
+                }
+            }
             context.setLineDash(phase: 0, lengths: [])
-            if let last = route.points.last {
+            if route.hostileFrom == nil, let last = route.points.last {
                 context.setFillColor(UIColor(Theme.amber).cgColor)
                 context.fillEllipse(in: CGRect(x: last.x - 5 * px, y: last.y - 5 * px, width: 10 * px, height: 10 * px))
             }
@@ -533,6 +595,15 @@ final class ProvinceRenderer: MKOverlayRenderer {
             guard MKMapRect(x: Double(box.minX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
                 .intersects(mapRect) else { continue }
             drawMarker(m, in: box, px: unit, context: context)
+        }
+        // 8. Batailles (au-dessus des pions)
+        for b in snap.battles where b.side != 0 || showAll {
+            let r = 15 * unit
+            let c = CGPoint(x: CGFloat(b.x), y: CGFloat(b.y) - 30 * unit)
+            let box = CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)
+            guard MKMapRect(x: Double(box.minX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
+                .insetBy(dx: -Double(r), dy: -Double(r)).intersects(mapRect) else { continue }
+            drawBattle(b, center: c, radius: r, px: unit, context: context)
         }
         UIGraphicsPopContext()
     }
@@ -609,6 +680,41 @@ final class ProvinceRenderer: MKOverlayRenderer {
         context.restoreGState()
     }
 
+    private func drawBattle(_ b: BattleMarker, center c: CGPoint, radius r: CGFloat, px: CGFloat, context: CGContext) {
+        context.saveGState()
+        context.setShadow(offset: CGSize(width: 0, height: 1.5 * px), blur: 5 * px, color: UIColor.black.withAlphaComponent(0.7).cgColor)
+        context.setFillColor(UIColor(red: 0.10, green: 0.05, blue: 0.05, alpha: 0.94).cgColor)
+        context.fillEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+        context.restoreGState()
+        // Anneau : la part de l'attaquant (en haut, sens horaire) contre celle du défenseur.
+        let ring = r - 2 * px
+        let start = -CGFloat.pi / 2
+        let split = start + CGFloat(b.balance) * 2 * .pi
+        context.setLineWidth(3.5 * px)
+        context.setLineCap(.butt)
+        context.setStrokeColor(b.attackerColor.cgColor)
+        context.addArc(center: c, radius: ring, startAngle: start, endAngle: split, clockwise: false)
+        context.strokePath()
+        context.setStrokeColor(b.defenderColor.cgColor)
+        context.addArc(center: c, radius: ring, startAngle: split, endAngle: start + 2 * .pi, clockwise: false)
+        context.strokePath()
+        // Contour : vert si le joueur prend l'avantage, rouge s'il le perd.
+        if b.side != 0 {
+            let winning = b.side == 1 ? b.balance > 0.5 : b.balance < 0.5
+            context.setStrokeColor((winning ? UIColor(Theme.teal) : UIColor(Theme.coral)).cgColor)
+            context.setLineWidth(1.5 * px)
+            context.strokeEllipse(in: CGRect(x: c.x - r - 1.5 * px, y: c.y - r - 1.5 * px, width: 2 * r + 3 * px, height: 2 * r + 3 * px))
+        }
+        let text = "⚔︎" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 15, weight: .heavy), .foregroundColor: UIColor.white]
+        let size = text.size(withAttributes: attrs)
+        context.saveGState()
+        context.translateBy(x: c.x, y: c.y)
+        context.scaleBy(x: px, y: px)
+        text.draw(at: CGPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attrs)
+        context.restoreGState()
+    }
+
     private func drawLabel(_ label: MapLabel, context: CGContext) {
         let base: CGFloat = 40
         let scale = CGFloat(label.size) / base
@@ -650,7 +756,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate {
     let overlay = ProvinceOverlay()
     weak var mapView: MKMapView?
     var renderer: ProvinceRenderer?
-    var onTap: ((GeoPoint) -> Void)?
+    var onTap: ((MapTap) -> Void)?
     var satellite = false
     var configured = false
     var lastFocusID = -1
@@ -665,8 +771,38 @@ final class MapCoordinator: NSObject, MKMapViewDelegate {
     @objc func handleTap(_ gesture: UITapGestureRecognizer) {
         guard let map = mapView, gesture.state == .ended else { return }
         let point = gesture.location(in: map)
+        if let snap = lastSnapshot {
+            // Points MapKit par point d'écran : sert à savoir quels pions sont dessinés.
+            let perPoint = map.visibleMapRect.size.width / Double(max(1, map.bounds.width))
+            let showAll = perPoint < 16_384
+            func screen(_ x: Double, _ y: Double) -> CGPoint {
+                map.convert(MKMapPoint(x: x, y: y).coordinate, toPointTo: map)
+            }
+            // Batailles d'abord (petites cibles, au-dessus des pions).
+            var best: (MapTap, CGFloat)?
+            for b in snap.battles where b.side != 0 || showAll {
+                let c = screen(b.x, b.y)
+                let d = hypot(point.x - c.x, point.y - (c.y - 30))
+                if d < 26 && d < (best?.1 ?? .infinity) { best = (.battle(b.id), d) }
+            }
+            for m in snap.armies where m.isPlayer || m.selected || showAll {
+                let c = screen(m.x, m.y)
+                let cx = c.x + CGFloat(m.slot) * 54
+                let dx = abs(point.x - cx), dy = abs(point.y - c.y)
+                // Les pions du joueur sont prioritaires ; zone tactile généreuse.
+                if dx < 32 && dy < 20 {
+                    let d = hypot(dx, dy) - (m.isPlayer ? 8 : 0)
+                    if d < (best?.1 ?? .infinity) { best = (.army(m.id), d) }
+                }
+            }
+            if let (tap, _) = best {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onTap?(tap)
+                return
+            }
+        }
         let coordinate = map.convert(point, toCoordinateFrom: map)
-        onTap?(GeoPoint(lat: coordinate.latitude, lon: coordinate.longitude))
+        onTap?(.point(GeoPoint(lat: coordinate.latitude, lon: coordinate.longitude)))
     }
 
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {

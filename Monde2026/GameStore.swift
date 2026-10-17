@@ -11,6 +11,7 @@ enum Panel: Identifiable, Hashable {
     case economy, military, production, diplomacy, world, politics, research, endGame, projects
     case country(CountryID)
     case event(Int)
+    case battle(Int)
 
     var id: String {
         switch self {
@@ -25,7 +26,14 @@ enum Panel: Identifiable, Hashable {
         case .endGame: return "endGame"
         case .country(let c): return "country-" + c
         case .event(let e): return "event-\(e)"
+        case .battle(let p): return "battle-\(p)"
         }
+    }
+
+    /// Panneau qui laisse le temps s'écouler (on regarde la bataille se dérouler).
+    var isLive: Bool {
+        if case .battle = self { return true }
+        return false
     }
 }
 
@@ -35,6 +43,7 @@ enum MapMode: String, CaseIterable, Identifiable {
     case relations = "Relations"
     case economy = "Économie"
     case military = "Armées"
+    case terrain = "Terrain"
 
     var id: String { rawValue }
 
@@ -45,6 +54,7 @@ enum MapMode: String, CaseIterable, Identifiable {
         case .relations: return "hand.raised"
         case .economy: return "chart.line.uptrend.xyaxis"
         case .military: return "scope"
+        case .terrain: return "mountain.2.fill"
         }
     }
 }
@@ -65,6 +75,7 @@ final class GameStore: ObservableObject {
     @Published var selectedProvince: Int?
     @Published var selectedCountry: CountryID?
     @Published var selectedArmy: Int?
+    @Published var armyGroup: Set<Int> = []    // armées commandées avec l'armée sélectionnée
     @Published private(set) var focus: MapFocus?
     private var focusCounter = 0
     @Published var satellite = false
@@ -109,7 +120,7 @@ final class GameStore: ObservableObject {
                 let delay = self?.delay ?? 300_000_000
                 try? await Task.sleep(nanoseconds: delay)
                 guard let self else { return }
-                if self.speed > 0 && self.panel == nil {
+                if self.speed > 0 && (self.panel == nil || self.panel?.isLive == true) {
                     self.step(days: self.speed == 3 ? 2 : 1)
                 }
             }
@@ -139,6 +150,11 @@ final class GameStore: ObservableObject {
         }
         if let id = selectedArmy, !(sim!.state.armies.contains { $0.id == id }) {
             selectedArmy = nil
+            armyGroup = []
+        }
+        if !armyGroup.isEmpty {
+            let alive = Set(sim!.state.armies.map { $0.id })
+            armyGroup = armyGroup.intersection(alive)
         }
         collectEvents()
         presentUrgent()
@@ -222,7 +238,92 @@ final class GameStore: ObservableObject {
         var selected = selectedCountry
         if case .country(let id)? = panel { selected = id }
         mapSnapshot = MapSnapshotBuilder.build(s, mode: mapMode, selected: selected, selectedProvince: selectedProvince,
-                                               selectedArmy: selectedArmy)
+                                               selectedArmy: selectedArmy, group: armyGroup)
+    }
+
+    func handleTap(_ tap: MapTap) {
+        switch tap {
+        case .point(let p): tapMap(p)
+        case .army(let id): tapArmy(id)
+        case .battle(let province): openBattle(province)
+        }
+    }
+
+    func openBattle(_ province: Int) {
+        guard sim?.state.battles[province] != nil else { return }
+        panel = .battle(province)
+    }
+
+    /// Toucher un pion : le sien = sélection (ou ajout au groupe) ; un ennemi = l'attaquer.
+    func tapArmy(_ id: Int) {
+        guard let s = sim, let a = s.state.armies.first(where: { $0.id == id }) else { return }
+        if a.owner == playerID {
+            if selectedArmy == id {
+                selectedArmy = nil
+                armyGroup = []
+            } else if let current = selectedArmy, s.state.armies.first(where: { $0.id == current })?.owner == playerID, !armyGroup.isEmpty {
+                // Mode groupe : toucher une armée l'ajoute ou la retire.
+                if armyGroup.contains(id) { armyGroup.remove(id) } else { armyGroup.insert(id) }
+            } else {
+                selectedArmy = id
+                armyGroup = []
+                selectedCountry = nil
+                selectedProvince = nil
+            }
+            refreshMap()
+            return
+        }
+        if let current = selectedArmy, s.state.armies.first(where: { $0.id == current })?.owner == playerID,
+           s.enemies(of: playerID ?? "").contains(a.owner) {
+            orderSelected(to: a.province)
+            return
+        }
+        selectedArmy = id
+        armyGroup = []
+        selectedCountry = nil
+        selectedProvince = nil
+        refreshMap()
+    }
+
+    /// Ordre à l'armée sélectionnée et à tout son groupe.
+    func orderSelected(to province: Int) {
+        guard let lead = selectedArmy else { return }
+        let ids = [lead] + armyGroup.sorted()
+        if ids.count == 1 {
+            perform { sim, _ in sim.orderArmy(lead, to: province) }
+            return
+        }
+        perform { sim, _ in
+            var ok = 0
+            var last = ActionResult(success: false, message: "")
+            for id in ids {
+                let r = sim.orderArmy(id, to: province)
+                if r.success { ok += 1 } else { last = r }
+            }
+            if ok == 0 { return last }
+            return ActionResult(success: true, message: "\(ok) armées en route vers \(ProvinceMap.all[province].name).")
+        }
+    }
+
+    /// Sélectionne en plus les armées voisines (même région ou régions adjacentes).
+    func groupNearby() {
+        guard let s = sim, let id = selectedArmy, let a = s.state.armies.first(where: { $0.id == id }), a.owner == playerID else { return }
+        let around = Set(ProvinceMap.all[a.province].neighbors + [a.province])
+        armyGroup = Set(s.state.armies.filter { $0.owner == a.owner && $0.id != id && around.contains($0.province) }.map { $0.id })
+        refreshMap()
+    }
+
+    /// Sélectionne toutes les armées du joueur placées sur le front.
+    func groupFront() {
+        guard let s = sim, let id = selectedArmy, let p = playerID else { return }
+        let front = s.frontierProvinces(p, enemies: s.enemies(of: p))
+        armyGroup = Set(s.state.armies.filter { $0.owner == p && $0.id != id && front.contains($0.province) }.map { $0.id })
+        refreshMap()
+    }
+
+    func clearGroup() {
+        armyGroup = []
+        refreshMap()
     }
 
     /// Toucher la carte : sélectionne la région et affiche la fiche rapide de son propriétaire.
@@ -251,7 +352,7 @@ final class GameStore: ObservableObject {
                 refreshMap()
                 return
             }
-            perform { sim, _ in sim.orderArmy(armyID, to: province.id) }
+            orderSelected(to: province.id)
             return
         }
         if let first = here.first {
@@ -272,12 +373,14 @@ final class GameStore: ObservableObject {
         selectedProvince = nil
         selectedCountry = nil
         selectedArmy = nil
+        armyGroup = []
         refreshMap()
     }
 
     func selectArmy(_ id: Int) {
         guard let s = sim, let a = s.state.armies.first(where: { $0.id == id }) else { return }
         selectedArmy = id
+        armyGroup = []
         selectedCountry = nil
         selectedProvince = nil
         panel = nil

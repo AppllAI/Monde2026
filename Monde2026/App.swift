@@ -48,6 +48,20 @@ struct RootView: View {
                     store.focusOn(inspect)
                     store.refreshMap()
                 }
+                if let mode = LaunchOptions.value("-mapmode").flatMap(MapMode.init(rawValue:)) {
+                    store.mapMode = mode
+                }
+                if let days = LaunchOptions.value("-advance").flatMap(Int.init) {
+                    store.step(days: days)
+                    store.panel = nil
+                }
+                if LaunchOptions.arguments.contains("-selectarmy"), let sim = store.sim {
+                    let mine = sim.armies(of: id)
+                    if let a = mine.first(where: { $0.engaged }) ?? mine.first { store.selectArmy(a.id) }
+                }
+                if LaunchOptions.arguments.contains("-openbattle"), let b = store.sim?.playerBattles().first {
+                    store.openBattle(b.province)
+                }
             }
         }
     }

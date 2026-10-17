@@ -77,11 +77,12 @@ struct InspectorCard: View {
     }
 
     private func regionLine(_ p: Province, _ owner: ProvinceOwner, _ sim: Simulation) -> String {
+        let terrain = " · " + TerrainMap.terrain(p.id).name.lowercased()
         switch owner.status {
-        case .core, .neutral: return "Région : \(p.name)"
-        case .occupied: return "\(p.name) : occupée par \(sim.name(owner.owner ?? ""))"
-        case .annexed: return "\(p.name) : annexée par \(sim.name(owner.owner ?? ""))"
-        case .rebel: return "\(p.name) : aux mains des rebelles"
+        case .core, .neutral: return "Région : \(p.name)" + terrain
+        case .occupied: return "\(p.name) : occupée par \(sim.name(owner.owner ?? ""))" + terrain
+        case .annexed: return "\(p.name) : annexée par \(sim.name(owner.owner ?? ""))" + terrain
+        case .rebel: return "\(p.name) : aux mains des rebelles" + terrain
         }
     }
 
@@ -153,6 +154,11 @@ struct MapLegend: View {
         case .military:
             item(Theme.coral, "En guerre")
             gradient([Theme.steel, Theme.amber], "Faible", "Puissante")
+        case .terrain:
+            ForEach(Terrain.allCases, id: \.self) { t in
+                let c = t.rgb
+                item(Color(red: c.0, green: c.1, blue: c.2), t.name)
+            }
         }
     }
 
@@ -208,6 +214,25 @@ struct MapButtons: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            if let sim = store.sim {
+                let battles = sim.playerBattles()
+                if !battles.isEmpty {
+                    Button { store.openBattle(battles[0].province) } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "flame.fill").font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Theme.coral)
+                                .frame(width: 44, height: 44)
+                                .glass(22)
+                            Text("\(battles.count)").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.ink)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Theme.coral, in: Capsule())
+                                .offset(x: 4, y: -4)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Batailles en cours : \(battles.count)")
+                }
+            }
             round("location.fill", "Centrer sur mon pays") {
                 if let p = store.playerID { store.focusOn(p) }
             }
@@ -226,72 +251,5 @@ struct MapButtons: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
-    }
-}
-
-// MARK: - Fiche d'une armée
-
-struct ArmyCard: View {
-    @ObservedObject var store: GameStore
-
-    var body: some View {
-        if let sim = store.sim, let id = store.selectedArmy, let a = sim.state.armies.first(where: { $0.id == id }) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    Text(Geo.flag(a.owner)).font(.system(size: 30))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(a.name).font(Theme.title(20)).foregroundStyle(Theme.paper)
-                        Text(sim.armyStatus(a)).font(Theme.small)
-                            .foregroundStyle(a.engaged ? Theme.coral : Theme.steel).lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    Button { store.clearSelection() } label: {
-                        Image(systemName: "xmark").font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(Theme.paper)
-                            .frame(width: 30, height: 30)
-                            .background(Color.white.opacity(0.08), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Désélectionner l'armée")
-                }
-                HStack(spacing: 14) {
-                    Readout(label: "Divisions", value: "\(a.count)")
-                    Readout(label: "Puissance", value: "\(sim.armyPower(a))", tint: Theme.amber)
-                    Readout(label: "Organisation", value: Fmt.pct(a.organization, 0),
-                            tint: a.organization < 0.4 ? Theme.coral : Theme.paper)
-                    ForEach(DivisionType.allCases.filter { (a.divisions[$0] ?? 0) > 0 }, id: \.self) { t in
-                        Readout(label: t.name, value: "\(a.divisions[t] ?? 0)")
-                    }
-                }
-                Meter(value: a.organization, tint: a.organization < 0.4 ? Theme.coral : Theme.teal)
-                if a.owner == store.playerID {
-                    Text(a.path.isEmpty ? "Touchez une région pour y envoyer cette armée. Une région ennemie voisine = attaque."
-                                        : "Touchez une autre région pour changer d'objectif.")
-                        .font(Theme.small).foregroundStyle(Theme.steel)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            if !a.path.isEmpty {
-                                QuietButton(title: "Arrêter", icon: "stop.fill") { store.mutate { $0.stopArmy(id) } }
-                            }
-                            QuietButton(title: "Diviser", icon: "square.split.2x1") {
-                                store.perform { s, _ in s.splitArmy(id) }
-                            }
-                            if sim.playerArmies(in: a.province).count > 1 {
-                                QuietButton(title: "Regrouper ici", icon: "square.stack.3d.up") {
-                                    store.perform { s, _ in s.mergeArmies(at: id) }
-                                }
-                            }
-                            QuietButton(title: "Renvoyer en garnison", icon: "house", tint: Theme.coral) {
-                                store.mutate { $0.dissolveArmy(id) }
-                                store.clearSelection()
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: 640)
-            .glass(24)
-        }
     }
 }

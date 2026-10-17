@@ -15,6 +15,7 @@ struct MilitaryPanel: View {
             overview(sim, c)
             WarsCard(store: store, sim: sim, country: c)
             PostureCard(store: store, country: c)
+            BattlesCard(store: store)
             ArmiesCard(store: store, sim: sim, country: c)
             DivisionsCard(store: store, country: c)
             ConscriptionCard(store: store, country: c)
@@ -247,7 +248,7 @@ struct ArmiesCard: View {
                         Image(systemName: a.engaged ? "flame.fill" : (a.path.isEmpty ? "shield.fill" : "arrow.right.circle.fill"))
                             .foregroundStyle(a.engaged ? Theme.coral : Theme.amber).frame(width: 22)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(a.name) : \(a.count) divisions").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.paper)
+                            Text("\(a.name) : \(a.count) div. · \(a.general.name) \(a.general.stars)").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.paper)
                             Text(sim.armyStatus(a)).font(Theme.small).foregroundStyle(Theme.steel).lineLimit(1)
                         }
                         Spacer()

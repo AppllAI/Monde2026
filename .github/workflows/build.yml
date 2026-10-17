@@ -78,6 +78,23 @@ jobs:
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
 
+          # 3b. Terrain, fiche d'armée, fiche de bataille (Ukraine, après 25 jours)
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -mapmode Terrain
+          sleep 15
+          xcrun simctl io "$UDID" screenshot /tmp/out/5-terrain.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 25 -selectarmy
+          sleep 25
+          xcrun simctl io "$UDID" screenshot /tmp/out/6-armee.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 25 -openbattle
+          sleep 25
+          xcrun simctl io "$UDID" screenshot /tmp/out/7-bataille.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+
           # 4. Une partie en accéléré
           (xcrun simctl launch --console-pty "$UDID" $BUNDLE -autostart FRA -speed 3 > game.log 2>&1 &)
           sleep 20

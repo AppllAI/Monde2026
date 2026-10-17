@@ -25,6 +25,10 @@ struct Army: Codable, Identifiable {
     var daysInPlace: Int         // sert au retranchement
     var engaged: Bool            // en train d'attaquer
     var amphibious: Bool         // débarquement en cours
+    var general: General = .staff
+    var stance: ArmyStance = .balanced
+    var planning: Double = 0     // 0…1 : offensive préparée
+    var supply: Double = 1       // 0…1 : ravitaillement
 
     var count: Int { divisions.values.reduce(0, +) }
     var destination: Int? { path.last }
@@ -275,7 +279,7 @@ extension Simulation {
 
     /// Chemin jusqu'à une région, à travers des régions amies ou ennemies (pas les pays neutres).
     /// Si aucun chemin terrestre n'existe, débarquement possible quand on domine la mer.
-    func route(for army: Army, to target: Int) -> (path: [Int], amphibious: Bool)? {
+    func route(for army: Army, to target: Int, throughEnemy: Bool = false) -> (path: [Int], amphibious: Bool)? {
         guard target != army.province, ProvinceMap.all.indices.contains(target) else { return nil }
         let owner = army.owner
         let foes = enemies(of: owner)
@@ -296,7 +300,7 @@ extension Simulation {
             head += 1
             if cur == target { break }
             // On ne traverse pas une région ennemie pour aller plus loin : on s'y arrête pour combattre.
-            if cur != army.province && foes.contains(controller(of: cur)) { continue }
+            if cur != army.province && foes.contains(controller(of: cur)) && !throughEnemy { continue }
             for n in ProvinceMap.all[cur].neighbors where previous[n] == nil && allowed(n) {
                 previous[n] = cur
                 queue.append(n)
@@ -353,10 +357,12 @@ extension Simulation {
         guard let start = place else { return ActionResult(success: false, message: "Aucune région où rassembler l'armée.") }
         let number = (state.armies.filter { $0.owner == id }.map { $0.id }.count) + 1
         let name = number == 1 ? "1re armée" : "\(number)e armée"
+        let general = makeGeneral(for: id, divisions: picked)
         state.armies.append(Army(id: state.nextArmyID, owner: id, name: name, province: start, divisions: picked,
-                                 path: [], progress: 0, organization: 1, daysInPlace: 0, engaged: false, amphibious: false))
+                                 path: [], progress: 0, organization: 1, daysInPlace: 0, engaged: false, amphibious: false,
+                                 general: general))
         state.nextArmyID += 1
-        return ActionResult(success: true, message: "\(name) formée : \(total) divisions à \(ProvinceMap.all[start].name).")
+        return ActionResult(success: true, message: "\(name) formée : \(total) divisions à \(ProvinceMap.all[start].name), sous les ordres du \(general.name).")
     }
 
     /// Région de rassemblement : au front si l'on est en guerre, sinon la capitale.
@@ -377,7 +383,8 @@ extension Simulation {
         guard let i = state.armies.firstIndex(where: { $0.id == armyID }) else {
             return ActionResult(success: false, message: "Armée introuvable.")
         }
-        guard let r = route(for: state.armies[i], to: target) else {
+        let offensive = enemies(of: state.armies[i].owner).contains(controller(of: target))
+        guard let r = route(for: state.armies[i], to: target, throughEnemy: offensive) else {
             let c = controller(of: target)
             if c != state.armies[i].owner && !enemies(of: state.armies[i].owner).contains(c) && !isFriendly(state.armies[i].owner, c) {
                 return ActionResult(success: false, message: "Pas d'accès : \(name(c)) n'est ni allié ni ennemi.")
@@ -389,7 +396,11 @@ extension Simulation {
         state.armies[i].progress = 0
         state.armies[i].engaged = false
         let dest = ProvinceMap.all[target].name
-        return ActionResult(success: true, message: r.amphibious ? "Débarquement ordonné vers \(dest)." : "En route vers \(dest) (\(r.path.count) régions).")
+        let foes = enemies(of: state.armies[i].owner)
+        let hostile = r.path.filter { foes.contains(controller(of: $0)) }.count
+        if r.amphibious { return ActionResult(success: true, message: "Débarquement ordonné vers \(dest).") }
+        if hostile > 1 { return ActionResult(success: true, message: "Offensive vers \(dest) : \(hostile) régions ennemies à prendre l'une après l'autre.") }
+        return ActionResult(success: true, message: hostile == 1 ? "Attaque sur \(dest)." : "En route vers \(dest) (\(r.path.count) régions).")
     }
 
     mutating func stopArmy(_ armyID: Int) {
@@ -416,9 +427,12 @@ extension Simulation {
         }
         let a = state.armies[i]
         let number = state.armies.filter { $0.owner == a.owner }.count + 1
+        let newGeneral = makeGeneral(for: a.owner, divisions: half)
         state.armies.append(Army(id: state.nextArmyID, owner: a.owner, name: "\(number)e armée", province: a.province,
                                  divisions: half, path: [], progress: 0, organization: a.organization,
-                                 daysInPlace: a.daysInPlace, engaged: false, amphibious: false))
+                                 daysInPlace: a.daysInPlace, engaged: false, amphibious: false,
+                                 general: newGeneral, stance: a.stance,
+                                 planning: a.planning, supply: a.supply))
         state.nextArmyID += 1
         return ActionResult(success: true, message: "Armée divisée en deux.")
     }
@@ -450,9 +464,13 @@ extension Simulation {
     // MARK: - Journée militaire
 
     mutating func dailyArmies() {
-        guard !state.armies.isEmpty || state.wars.contains(where: { $0.isActive }) else { return }
+        guard !state.armies.isEmpty || state.wars.contains(where: { $0.isActive }) else {
+            if !state.battles.isEmpty { state.battles = [:] }
+            return
+        }
         let ownersWithArmies = Set(state.armies.map { $0.owner })
         for id in ownersWithArmies { normalizeArmies(id) }
+        if state.day % 2 == 0 { updateSupply() }
         if state.day % 3 == 0 { aiArmies() }
 
         var enemiesCache: [CountryID: Set<CountryID>] = [:]
@@ -463,15 +481,32 @@ extension Simulation {
             return e
         }
 
-        // 1. Déplacements
+        // 1. Déplacements, planification, ravitaillement
         var attacks: [Int: [Int]] = [:]       // région visée -> indices d'armées
         for i in state.armies.indices {
             var a = state.armies[i]
+            let readiness = state.countries[a.owner]?.readiness ?? 0.5
+            // Sans ravitaillement : le moral ne remonte plus, l'armée s'use.
+            if a.supply < 0.4 {
+                a.organization = max(0, a.organization - (a.supply <= 0.15 ? 0.02 : 0.005))
+                if state.day % 5 == 0 {
+                    state.armies[i] = a
+                    applyArmyLosses(i, intensity: a.supply <= 0.15 ? 0.01 : 0.004)
+                    a = state.armies[i]
+                }
+            }
             guard let next = a.path.first else {
                 a.engaged = false
-                a.daysInPlace += 1
-                let readiness = state.countries[a.owner]?.readiness ?? 0.5
-                a.organization = min(1, a.organization + 0.03 * (0.5 + 0.5 * readiness))
+                a.daysInPlace += a.general.trait == .defensive ? 2 : 1
+                let defending = state.battles[a.province] != nil
+                if a.supply >= 0.4 && !defending {
+                    let regen = 0.03 * (0.5 + 0.5 * readiness) * (a.general.trait == .logistician ? 1.3 : 1) * a.supply
+                    a.organization = min(1, a.organization + regen)
+                    if a.supply >= 0.5 {
+                        let speed = (a.general.trait == .planner ? 0.05 : 0.034) * (a.stance == .defend ? 0.5 : 1)
+                        a.planning = min(1, a.planning + speed)
+                    }
+                }
                 state.armies[i] = a
                 continue
             }
@@ -488,10 +523,13 @@ extension Simulation {
                 attacks[next, default: []].append(i)
                 state.armies[i] = a
             } else if holder == a.owner || isFriendly(a.owner, holder) {
-                let speed = (a.isMotorized ? 45.0 : 30.0) * (0.6 + 0.4 * (state.countries[a.owner]?.infrastructure ?? 0.5))
-                let days = a.amphibious ? distanceKm(a.province, next) / 400 + 3 : distanceKm(a.province, next) / speed
+                var speed = (a.isMotorized ? 45.0 : 30.0) * (0.6 + 0.4 * (state.countries[a.owner]?.infrastructure ?? 0.5))
+                speed *= TerrainMap.terrain(next).movement * weather(at: next).movement
+                if a.supply < 0.4 { speed *= 0.7 }
+                let days = a.amphibious ? distanceKm(a.province, next) / 400 + 3 : distanceKm(a.province, next) / max(5, speed)
                 a.progress += 1 / max(1, days)
                 a.engaged = false
+                a.planning = max(0, a.planning - 0.04)
                 if a.progress >= 1 {
                     a.province = next
                     a.path.removeFirst()
@@ -509,15 +547,14 @@ extension Simulation {
         }
 
         // 2. Batailles
-        guard !attacks.isEmpty else {
-            regenerateProvinceOrganization()
-            return
+        if !attacks.isEmpty {
+            var frontierCache: [CountryID: (Set<Int>, Int)] = [:]
+            for (target, attackerIndices) in attacks.sorted(by: { $0.key < $1.key }) {
+                fightProvinceBattle(target: target, attackerIndices: attackerIndices, frontierCache: &frontierCache)
+            }
+            state.armies.removeAll { $0.count == 0 }
         }
-        var frontierCache: [CountryID: (Set<Int>, Int)] = [:]
-        for (target, attackerIndices) in attacks.sorted(by: { $0.key < $1.key }) {
-            resolveProvinceBattle(target: target, attackerIndices: attackerIndices, frontierCache: &frontierCache)
-        }
-        state.armies.removeAll { $0.count == 0 }
+        closeBattlesAndPromote()
         regenerateProvinceOrganization()
     }
 
@@ -528,102 +565,7 @@ extension Simulation {
         }
     }
 
-    private mutating func resolveProvinceBattle(target: Int, attackerIndices: [Int],
-                                                frontierCache: inout [CountryID: (Set<Int>, Int)]) {
-        let defenderCountry = controller(of: target)
-        let attackersAll = attackerIndices.filter { state.armies.indices.contains($0) }
-        guard !attackersAll.isEmpty, state.countries[defenderCountry] != nil else { return }
-        let leadOwner = state.armies[attackersAll[0]].owner
-        let defenderFoes = enemies(of: defenderCountry)
-        let attackers = attackersAll.filter { defenderFoes.contains(state.armies[$0].owner) }
-        guard !attackers.isEmpty else { return }
-        let defenders = state.armies.indices.filter { j in
-            state.armies[j].province == target && isFriendly(defenderCountry, state.armies[j].owner)
-                && !defenderFoes.isEmpty && !attackers.contains(j)
-        }
-
-        let attHardness = attackers.reduce(0.0) { $0 + state.armies[$1].hardness } / Double(attackers.count)
-        let defHardness = defenders.isEmpty ? 0.1 : defenders.reduce(0.0) { $0 + state.armies[$1].hardness } / Double(defenders.count)
-
-        var attack = 0.0
-        for i in attackers {
-            var value = armyAttack(state.armies[i], vsHardness: defHardness)
-            if state.armies[i].amphibious { value *= 0.6 }
-            attack += value
-        }
-        // Largeur de front : on ne peut engager qu'un nombre limité de divisions dans une région.
-        let width = combatWidth(target)
-        let attackingDivisions = attackers.reduce(0) { $0 + state.armies[$1].count }
-        attack *= min(1, width / Double(max(1, attackingDivisions)))
-        let air = airSuperiority(leadOwner, defenderCountry)
-        attack *= 1 + 0.1 * (air - 0.5) * 2
-
-        var armyDefenseTotal = 0.0
-        for j in defenders { armyDefenseTotal += armyDefense(state.armies[j], vsHardness: attHardness) }
-        let defendingDivisions = defenders.reduce(0) { $0 + state.armies[$1].count }
-        armyDefenseTotal *= min(1, width / Double(max(1, defendingDivisions)))
-        if frontierCache[defenderCountry] == nil {
-            let front = frontierProvinces(defenderCountry, enemies: defenderFoes)
-            frontierCache[defenderCountry] = (front, provincesControlled(by: defenderCountry).count)
-        }
-        let (front, controlledCount) = frontierCache[defenderCountry] ?? ([], 1)
-        let garrisonOrg = state.provinceOrg[target] ?? 1
-        let garrison = garrisonDefense(defenderCountry, at: target, frontier: front, controlledCount: controlledCount)
-            * (0.3 + 0.7 * garrisonOrg)
-        var defense = armyDefenseTotal + garrison
-        if ProvinceMap.all[target].country == defenderCountry { defense *= 1.25 }    // on défend sa terre
-        defense *= 1 + 0.1 * (0.5 - air) * 2
-        let noise = Double.random(in: 0.85...1.15, using: &state.rng)
-        attack *= noise
-
-        let total = max(attack + defense, 0.001)
-        let pressureOnAttackers = defense / total
-        let pressureOnDefenders = attack / total
-
-        // Organisation et pertes
-        for i in attackers {
-            state.armies[i].organization = max(0, state.armies[i].organization - 0.09 * pressureOnAttackers)
-            applyArmyLosses(i, intensity: 0.004 * pressureOnAttackers)
-        }
-        for j in defenders {
-            state.armies[j].organization = max(0, state.armies[j].organization - 0.09 * pressureOnDefenders)
-            state.armies[j].daysInPlace += 1
-            applyArmyLosses(j, intensity: 0.004 * pressureOnDefenders)
-        }
-        state.provinceOrg[target] = max(0, garrisonOrg - 0.09 * pressureOnDefenders)
-        if var d = state.countries[defenderCountry], defenders.isEmpty {
-            // Pertes de la garnison
-            let share = 1.0 / Double(max(1, controlledCount))
-            d.applyLandLosses(fraction: 0.003 * pressureOnDefenders * d.posture.losses, share: share)
-            state.countries[defenderCountry] = d
-        }
-
-        // Issue de la journée
-        let defenderOrg: Double
-        if defense <= 0.0001 {
-            defenderOrg = 0
-        } else {
-            let armyOrg = defenders.isEmpty ? 0 : defenders.reduce(0.0) { $0 + state.armies[$1].organization } / Double(defenders.count)
-            let orgNow = state.provinceOrg[target] ?? 0
-            defenderOrg = defenders.isEmpty ? orgNow : (armyOrg * armyDefenseTotal + orgNow * garrison) / max(armyDefenseTotal + garrison, 0.001)
-        }
-        let attackerOrg = attackers.reduce(0.0) { $0 + state.armies[$1].organization } / Double(attackers.count)
-
-        if defenderOrg < 0.2 {
-            captureProvince(target, by: attackers, defenders: defenders, from: defenderCountry)
-        } else if attackerOrg < 0.25 {
-            for i in attackers {
-                state.armies[i].path = []
-                state.armies[i].engaged = false
-                state.armies[i].amphibious = false
-            }
-            if attackers.contains(where: { state.armies[$0].owner == state.playerID }) {
-                addEvent("🛡️ Notre offensive sur \(ProvinceMap.all[target].name) est repoussée.", important: true)
-            }
-        }
-    }
-
-    private mutating func applyArmyLosses(_ index: Int, intensity: Double) {
+    mutating func applyArmyLosses(_ index: Int, intensity: Double) {
         let a = state.armies[index]
         guard var c = state.countries[a.owner] else { return }
         let share = Double(a.count) / Double(max(1, c.divisionCount))
@@ -631,7 +573,7 @@ extension Simulation {
         state.countries[a.owner] = c
     }
 
-    private mutating func captureProvince(_ target: Int, by attackers: [Int], defenders: [Int], from loser: CountryID) {
+    mutating func captureProvince(_ target: Int, by attackers: [Int], defenders: [Int], from loser: CountryID) {
         let province = ProvinceMap.all[target]
         let winner = state.armies[attackers[0]].owner
         // Retraite des défenseurs vers une région amie voisine, sinon destruction.
@@ -813,23 +755,35 @@ extension Simulation {
                 // Les armées amies voisines de la même cible attaquent avec nous (dans la limite du front).
                 var att = 0.0
                 var divs = 0
+                let terrain = TerrainMap.terrain(n)
                 for j in mine where state.armies[j].organization > 0.6 && ProvinceMap.all[state.armies[j].province].neighbors.contains(n) {
-                    att += armyAttack(state.armies[j], vsHardness: 0.2)
-                    divs += state.armies[j].count
+                    let b = state.armies[j]
+                    var v = armyAttack(b, vsHardness: 0.2) * (1 + 0.25 * b.planning) * (0.45 + 0.55 * b.supply)
+                    if TerrainMap.river(b.province, n) { v *= 0.75 }
+                    att += v
+                    divs += b.count
                 }
-                att *= min(1, combatWidth(n) / Double(max(1, divs)))
+                att *= terrain.attack * weather(at: n).attack
+                att *= min(1, combatWidth(n) * terrain.width / Double(max(1, divs)))
                 let ratio = att / max(def, 0.001)
                 if ratio > (best?.1 ?? 0) { best = (n, ratio) }
             }
-            if let (target, ratio) = best, ratio >= threshold {
+            // On attend que l'offensive soit préparée, sauf si l'avantage est écrasant.
+            if let (target, ratio) = best, ratio >= threshold, a.planning >= 0.5 || ratio >= threshold * 1.4 {
+                let stance: ArmyStance = ratio >= threshold * 1.5 ? .assault : .balanced
                 for j in mine where state.armies[j].path.isEmpty && state.armies[j].organization > 0.6
                     && ProvinceMap.all[state.armies[j].province].neighbors.contains(target) {
                     state.armies[j].path = [target]
                     state.armies[j].amphibious = false
+                    state.armies[j].stance = stance
                 }
             }
         }
         rebalanceDefense(id, front: front, foes: foes)
+        // Les armées qui n'attaquent pas se mettent en défense (sauf doctrine offensive).
+        for i in state.armies.indices where state.armies[i].owner == id && state.armies[i].path.isEmpty {
+            state.armies[i].stance = c.posture == .offensive && state.armies[i].organization > 0.8 ? .balanced : .defend
+        }
     }
 
     /// Défense : les armées au calme rejoignent les régions du front les plus menacées.
@@ -881,6 +835,8 @@ extension Simulation {
     }
 
     func armyStatus(_ a: Army) -> String {
+        if a.supply <= 0.15 { return "Encerclée à \(ProvinceMap.all[a.province].name)" }
+        if state.battles[a.province] != nil && a.path.isEmpty { return "Défend \(ProvinceMap.all[a.province].name)" }
         if let next = a.path.first {
             let nextName = ProvinceMap.all[next].name
             if a.amphibious { return "Débarquement vers \(nextName)" }

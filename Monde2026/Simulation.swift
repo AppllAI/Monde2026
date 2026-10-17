@@ -61,6 +61,7 @@ struct GameState: Codable {
     var annexedProvinces: Set<Int>
     var provinceOrg: [Int: Double]         // organisation des garnisons après un combat
     var autoArmies: Bool                   // le joueur laisse l'IA commander ses armées
+    var battles: [Int: Battle] = [:]       // batailles en cours, par région disputée
 }
 
 struct Simulation {

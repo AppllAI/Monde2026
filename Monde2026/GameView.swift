@@ -12,8 +12,8 @@ struct GameView: View {
 
     var body: some View {
         ZStack {
-            WorldMapView(snapshot: store.mapSnapshot, satellite: store.satellite, focus: store.focus) { point in
-                store.tapMap(point)
+            WorldMapView(snapshot: store.mapSnapshot, satellite: store.satellite, focus: store.focus) { tap in
+                store.handleTap(tap)
             }
             .equatable()
             .ignoresSafeArea()
@@ -302,6 +302,7 @@ struct PanelHost: View {
                 case .projects: ProjectsPanel(store: store)
                 case .event(let eventID): EventPanel(store: store, eventID: eventID)
                 case .endGame: EndGamePanel(store: store)
+                case .battle(let province): BattlePanel(store: store, province: province)
                 }
                 if let message = store.feedback {
                     Text(message).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink)
