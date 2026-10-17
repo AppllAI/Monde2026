@@ -98,7 +98,8 @@ extension Simulation {
             state.constructions[i].daysLeft -= 1
             if state.constructions[i].daysLeft <= 0 { done.append(state.constructions[i]) }
         }
-        state.constructions.removeAll { $0.daysLeft <= 0 || controller(of: $0.province) != $0.owner }
+        let jobs = state.constructions
+        state.constructions = jobs.filter { $0.daysLeft > 0 && controller(of: $0.province) == $0.owner }
         for job in done where controller(of: job.province) == job.owner {
             switch job.kind {
             case .fort: state.forts[job.province] = min(Simulation.maxFortLevel, fortLevel(job.province) + 1)
