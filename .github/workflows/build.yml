@@ -79,9 +79,19 @@ jobs:
           sleep 2
 
           # 3b. Terrain, fiche d'armée, fiche de bataille (Ukraine, après 25 jours)
-          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -mapmode Terrain
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -mapmode Commerce -maptray
           sleep 15
           xcrun simctl io "$UDID" screenshot /tmp/out/5-terrain.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -panel industry
+          sleep 15
+          xcrun simctl io "$UDID" screenshot /tmp/out/8-industrie.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -panel army
+          sleep 15
+          xcrun simctl io "$UDID" screenshot /tmp/out/9-armee-panneau.png
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
           xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 25 -selectarmy

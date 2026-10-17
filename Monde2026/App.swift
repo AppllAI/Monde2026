@@ -62,6 +62,12 @@ struct RootView: View {
                 if LaunchOptions.arguments.contains("-openbattle"), let b = store.sim?.playerBattles().first {
                     store.openBattle(b.province)
                 }
+                if LaunchOptions.arguments.contains("-maptray") { store.mapTray = true }
+                switch LaunchOptions.value("-panel") {
+                case "industry"?: store.panel = .production
+                case "army"?: store.panel = .military
+                default: break
+                }
             }
         }
     }
