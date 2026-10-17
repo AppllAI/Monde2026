@@ -39,6 +39,7 @@ struct ArmyCard: View {
                         let ids = [id] + store.armyGroup.sorted()
                         store.mutate { $0.setStance(stance, for: ids) }
                     }
+                    OperationsRow(store: store, army: a, sim: sim)
                     if !store.armyGroup.isEmpty {
                         HStack {
                             Label("\(store.armyGroup.count + 1) armées ensemble", systemImage: "square.stack.3d.up.fill")
@@ -792,5 +793,74 @@ struct ArmyOrganizer: View {
         }
         .buttonStyle(Pressable())
         .disabled(!enabled)
+    }
+}
+
+
+// MARK: - Opérations d'une armée
+
+/// Plusieurs façons d'envahir : assaut, tenaille, bombardement, parachutage, troupes envoyées chez un allié.
+struct OperationsRow: View {
+    @ObservedObject var store: GameStore
+    let army: Army
+    let sim: Simulation
+
+    var body: some View {
+        let para = Double(army.divisions[.airborne] ?? 0) / Double(max(1, army.count))
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                op(.encircle, "Tenaille", enabled: !store.armyGroup.isEmpty)
+                op(.bombard, "Bombarder", enabled: true)
+                op(.airdrop, "Parachuter", enabled: para >= 0.6)
+                Menu {
+                    let p = store.playerID ?? ""
+                    let hosts = sim.countryIDs.filter { $0 != p && sim.isAtWar($0) && !sim.enemies(of: p).contains($0) && sim.relation(p, $0) > -20 }
+                        .sorted { sim.relation(p, $0) > sim.relation(p, $1) }.prefix(12)
+                    if let host = army.servingFor {
+                        Button("Rappeler (sert \(sim.name(host)))", systemImage: "arrow.uturn.backward") {
+                            let id = army.id
+                            store.perform { s, _ in s.recallExpedition(id) }
+                        }
+                    }
+                    Section("En secret (volontaires)") {
+                        ForEach(Array(hosts), id: \.self) { h in
+                            Button("\(Geo.flag(h)) \(sim.name(h))") {
+                                let id = army.id
+                                store.perform { s, _ in s.sendExpedition(id, to: h, covert: true) }
+                            }
+                        }
+                    }
+                    Section("Officiellement") {
+                        ForEach(Array(hosts), id: \.self) { h in
+                            Button("\(Geo.flag(h)) \(sim.name(h))") {
+                                let id = army.id
+                                store.perform { s, _ in s.sendExpedition(id, to: h, covert: false) }
+                            }
+                        }
+                    }
+                } label: {
+                    chip(army.servingFor == nil ? "Aider un pays" : "Au service de \(sim.name(army.servingFor ?? ""))",
+                         icon: "figure.walk.departure", on: army.servingFor != nil, enabled: true)
+                }
+            }
+        }
+    }
+
+    private func op(_ o: ArmyOperation, _ title: String, enabled: Bool) -> some View {
+        Button {
+            store.armyOp = store.armyOp == o ? nil : o
+        } label: {
+            chip(title, icon: o.icon, on: store.armyOp == o, enabled: enabled)
+        }
+        .buttonStyle(Pressable())
+        .disabled(!enabled)
+    }
+
+    private func chip(_ title: String, icon: String, on: Bool, enabled: Bool) -> some View {
+        Label(title, systemImage: icon)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(on ? Theme.ink : (enabled ? Theme.coral : Theme.steel.opacity(0.5)))
+            .padding(.horizontal, 11).padding(.vertical, 8)
+            .background(on ? Theme.coral : Theme.coral.opacity(enabled ? 0.12 : 0.04), in: Capsule())
     }
 }

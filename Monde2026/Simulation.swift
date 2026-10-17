@@ -70,6 +70,12 @@ struct GameState: Codable {
     var complexes: [Int: [BuildingKind: Int]] = [:]    // région -> complexes industriels
     var industryCache: [CountryID: IndustryBonus] = [:]
     var depots: [Int: [DivisionType: Int]] = [:]        // divisions du joueur en réserve, par base
+    var proxyConquests: [Int: CountryID] = [:]          // régions prises par nos troupes pour un autre pays
+    var jointPlans: [JointPlan] = []                    // attaques conjointes prévues
+    var leases: [FactoryLease] = []                     // usines prêtées
+    var covertAid: [CovertAid] = []                     // aides secrètes en cours
+    var bombardments: [Int: Bombardment] = [:]          // régions sous les bombes
+    var nextPlanID = 1
 }
 
 struct Simulation {
@@ -161,6 +167,7 @@ struct Simulation {
         dailyTraining()
         dailyConstruction()
         syncDepots()
+        dailyOperations()
         dailyWar()
         scheduledNews()
         if Simulation.calendar.component(.day, from: currentDate) == 1 {
@@ -199,6 +206,7 @@ struct Simulation {
         aiFortify()
         aiIndustry()
         refreshIndustryBonuses()
+        monthlyIntrigue()
         aiNuclearDecisions()
         monthlyGoals()
         monthlyAchievements()

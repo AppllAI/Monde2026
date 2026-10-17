@@ -112,6 +112,14 @@ struct BattleMarker: Equatable, Identifiable {
     var fronts: [CGPoint] = []       // d'où partent les attaques
 }
 
+/// Taille des pions : de près, taille normale ; vue du monde, environ moitié plus petits.
+enum MarkerScale {
+    static func factor(_ mapPointsPerScreenPoint: Double) -> CGFloat {
+        let t = (log2(150_000) - log2(max(1, mapPointsPerScreenPoint))) / 3
+        return CGFloat(min(1, max(0.42, 0.42 + 0.58 * t)))
+    }
+}
+
 /// Ce que l'on a touché sur la carte.
 enum MapTap {
     case point(GeoPoint)
@@ -130,6 +138,7 @@ struct MapSnapshot: Equatable {
     var battles: [BattleMarker] = []
     var structures: [StructureMarker] = []
     var highlight: Set<Int> = []        // régions où l'on peut construire
+    var bombed: [CGPoint] = []          // régions sous les bombes
 
     static let empty = MapSnapshot(fills: [], borders: [], labels: [], plans: [], selectedProvince: nil)
 }
@@ -146,7 +155,7 @@ enum MapSnapshotBuilder {
         var colorCache: [CountryID: UIColor] = [:]
         func color(_ id: CountryID) -> UIColor {
             if let cached = colorCache[id] { return cached }
-            let c = countryColor(id, sim: sim, mode: mode)
+            let c = countryColor(id, sim: sim, mode: mode, focus: selected ?? player)
             colorCache[id] = c
             return c
         }
@@ -165,6 +174,10 @@ enum MapSnapshotBuilder {
             case .rebel:
                 fills.append(ProvinceFill(color: RGBA(Theme.rebelLand),
                                           stripes: RGBA(UIColor.black, alpha: 0.35)))
+            case .occupied where sim.state.proxyConquests[p.id] != nil && sim.state.proxyConquests[p.id] == player:
+                // Prise par nos troupes pour un autre pays : rayée de bleu (on sait que c'est nous).
+                let holder = info.owner ?? p.country
+                fills.append(ProvinceFill(color: RGBA(color(holder)), stripes: RGBA(allyBlue, alpha: 0.95)))
             case .occupied:
                 let holder = info.owner ?? p.country
                 fills.append(ProvinceFill(color: RGBA(color(holder)),
@@ -348,10 +361,17 @@ enum MapSnapshotBuilder {
         snap.battles = battleMarkers
         snap.structures = structures
         snap.highlight = highlight
+        snap.bombed = sim.state.bombardments.keys.sorted().map { k in
+            let q = provinces[k].labelPoint
+            return CGPoint(x: q.x, y: q.y)
+        }
         return snap
     }
 
-    static func countryColor(_ id: CountryID, sim: Simulation, mode: MapMode) -> UIColor {
+    static let focusGreen = UIColor(red: 0.30, green: 0.80, blue: 0.45, alpha: 1)
+    static let allyBlue = UIColor(red: 0.33, green: 0.56, blue: 0.96, alpha: 1)
+
+    static func countryColor(_ id: CountryID, sim: Simulation, mode: MapMode, focus: CountryID? = nil) -> UIColor {
         let player = sim.state.playerID
         guard sim.state.countries[id] != nil else { return Theme.neutralLand }
         switch mode {
@@ -364,8 +384,17 @@ enum MapSnapshotBuilder {
             if allies.contains("CHN") || allies.contains("RUS") || id == "CHN" { return UIColor(Theme.blocColor("CHN-ALLY")) }
             return Theme.neutralLand
         case .relations:
-            guard let p = player else { return Theme.neutralLand }
-            return id == p ? UIColor(Theme.amber) : UIColor(Theme.relationColor(sim.relation(p, id)))
+            // Le pays regardé s'allume en vert ; ses ennemis en rouge, ses alliés en bleu, le reste en gris.
+            guard let f = focus ?? player else { return Theme.neutralLand }
+            if id == f { return focusGreen }
+            if sim.enemies(of: f).contains(id) { return UIColor(Theme.coral) }
+            if sim.hasTreaty(.alliance, f, id) { return allyBlue }
+            if let fac = sim.faction(of: f), sim.faction(of: id)?.id == fac.id { return allyBlue.lighter(0.2) }
+            if sim.hasTreaty(.guarantee, f, id) || sim.hasTreaty(.guarantee, id, f) { return allyBlue.lighter(0.45) }
+            let r = sim.relation(f, id)
+            let grey = UIColor(white: 0.42 + 0.18 * CGFloat(max(-1, min(1, r / 100))), alpha: 1)
+            if r < -50 { return UIColor(red: 0.45, green: 0.30, blue: 0.30, alpha: 1) }
+            return grey
         case .economy:
             return UIColor(Theme.growthColor(sim.state.countries[id]?.growth ?? 0))
         case .military:
@@ -391,7 +420,7 @@ enum MapSnapshotBuilder {
             }
             return UIColor(red: 0.93, green: 0.55, blue: 0.22, alpha: 1)
         case .allies:
-            guard let p = player else { return Theme.neutralLand }
+            guard let p = focus ?? player else { return Theme.neutralLand }
             if id == p { return UIColor(Theme.amber) }
             if sim.enemies(of: p).contains(id) { return UIColor(Theme.coral) }
             if sim.hasTreaty(.alliance, p, id) { return UIColor(Theme.teal) }
@@ -674,36 +703,50 @@ final class ProvinceRenderer: MKOverlayRenderer {
         let showAll = zoomScale > 1.0 / 32768
         // Les tuiles sont dessinées en pixels (écran Retina) : on double la taille pour avoir de vrais points.
         let unit = px * 2
+        // Taille des pions selon le zoom : petits vue du monde, pleins de près.
+        let u = unit * MarkerScale.factor(Double(unit))
         // 7a. Forts et bases (de près)
         if zoomScale > 1.0 / 16384 {
             for st in snap.structures {
-                let c = CGPoint(x: CGFloat(st.x) - 40 * unit, y: CGFloat(st.y) + 22 * unit)
+                let c = CGPoint(x: CGFloat(st.x) - 40 * u, y: CGFloat(st.y) + 22 * u)
                 guard MKMapRect(x: Double(c.x) - 40, y: Double(c.y) - 40, width: 80, height: 80)
-                    .insetBy(dx: -Double(30 * unit), dy: -Double(30 * unit)).intersects(mapRect) else { continue }
-                drawStructure(st, at: c, px: unit, context: context)
+                    .insetBy(dx: -Double(30 * u), dy: -Double(30 * u)).intersects(mapRect) else { continue }
+                drawStructure(st, at: c, px: u, context: context)
             }
         }
         // 7b. Flèches d'attaque des batailles (sous les pions)
         for b in snap.battles where b.side != 0 || showAll {
-            for f in b.fronts { drawAttackArrow(from: f, to: CGPoint(x: b.x, y: b.y), color: b.attackerColor, px: unit, context: context) }
+            for f in b.fronts { drawAttackArrow(from: f, to: CGPoint(x: b.x, y: b.y), color: b.attackerColor, px: u, context: context) }
         }
         for m in snap.armies where m.isPlayer || m.selected || showAll {
-            let w = 62 * unit, h = 26 * unit
-            let cx = CGFloat(m.x) + CGFloat(m.slot) * 66 * unit
+            let w = 62 * u, h = 26 * u
+            let cx = CGFloat(m.x) + CGFloat(m.slot) * 66 * u
             let cy = CGFloat(m.y)
             let box = CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
             guard MKMapRect(x: Double(box.minX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
                 .intersects(mapRect) else { continue }
-            drawMarker(m, in: box, px: unit, context: context)
+            drawMarker(m, in: box, px: u, context: context)
         }
         // 8. Batailles (au-dessus des pions)
         for b in snap.battles where b.side != 0 || showAll {
-            let r = 15 * unit
-            let c = CGPoint(x: CGFloat(b.x), y: CGFloat(b.y) - 32 * unit)
+            let r = 15 * u
+            let c = CGPoint(x: CGFloat(b.x), y: CGFloat(b.y) - 32 * u)
             let box = CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)
             guard MKMapRect(x: Double(box.minX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
                 .insetBy(dx: -Double(r), dy: -Double(r)).intersects(mapRect) else { continue }
-            drawBattle(b, center: c, radius: r, px: unit, context: context)
+            drawBattle(b, center: c, radius: r, px: u, context: context)
+        }
+        // 9. Bombardements en cours
+        for b in snap.bombed {
+            let c = CGPoint(x: b.x + 26 * u, y: b.y - 30 * u)
+            let text = "💥" as NSString
+            let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 18)]
+            let size = text.size(withAttributes: attrs)
+            context.saveGState()
+            context.translateBy(x: c.x, y: c.y)
+            context.scaleBy(x: u, y: u)
+            text.draw(at: CGPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attrs)
+            context.restoreGState()
         }
         UIGraphicsPopContext()
     }
@@ -998,9 +1041,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate {
         guard let map = mapView, gesture.state == .ended else { return }
         let point = gesture.location(in: map)
         if let snap = lastSnapshot {
-            // Points MapKit par point d'écran : sert à savoir quels pions sont dessinés.
+            // Points MapKit par point d'écran : sert à savoir quels pions sont dessinés, et à quelle taille.
             let perPoint = map.visibleMapRect.size.width / Double(max(1, map.bounds.width))
             let showAll = perPoint < 16_384
+            let k = MarkerScale.factor(perPoint)
             func screen(_ x: Double, _ y: Double) -> CGPoint {
                 map.convert(MKMapPoint(x: x, y: y).coordinate, toPointTo: map)
             }
@@ -1008,15 +1052,15 @@ final class MapCoordinator: NSObject, MKMapViewDelegate {
             var best: (MapTap, CGFloat)?
             for b in snap.battles where b.side != 0 || showAll {
                 let c = screen(b.x, b.y)
-                let d = hypot(point.x - c.x, point.y - (c.y - 32))
-                if d < 30 && d < (best?.1 ?? .infinity) { best = (.battle(b.id), d) }
+                let d = hypot(point.x - c.x, point.y - (c.y - 32 * k))
+                if d < max(20, 30 * k) && d < (best?.1 ?? .infinity) { best = (.battle(b.id), d) }
             }
             for m in snap.armies where m.isPlayer || m.selected || showAll {
                 let c = screen(m.x, m.y)
-                let cx = c.x + CGFloat(m.slot) * 66
+                let cx = c.x + CGFloat(m.slot) * 66 * k
                 let dx = abs(point.x - cx), dy = abs(point.y - c.y)
-                // Les pions du joueur sont prioritaires ; zone tactile généreuse.
-                if dx < 36 && dy < 22 {
+                // Les pions du joueur sont prioritaires ; zone tactile généreuse (au moins 22 points).
+                if dx < max(22, 36 * k) && dy < max(16, 22 * k) {
                     let d = hypot(dx, dy) - (m.isPlayer ? 8 : 0)
                     if d < (best?.1 ?? .infinity) { best = (.army(m.id), d) }
                 }

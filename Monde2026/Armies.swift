@@ -30,6 +30,13 @@ struct Army: Codable, Identifiable {
     var experience: Double = 0.3 // 0…1 : entraînement des troupes
     var training: Bool = false   // à l'entraînement (deux fois plus vite dans une base)
     var supply: Double = 1       // 0…1 : ravitaillement
+    var servingFor: CountryID? = nil   // corps expéditionnaire : combat pour ce pays
+    var covert: Bool = false           // envoyé en secret (volontaires « non officiels »)
+    var airdrop: Bool = false          // parachutage en cours
+    var cutDays: Int = 0               // jours d'encerclement (reddition au bout d'un moment)
+
+    /// Le camp pour lequel l'armée se bat.
+    var side: CountryID { servingFor ?? owner }
 
     static let maxDivisions = 30
 
@@ -295,13 +302,13 @@ extension Simulation {
     /// Si aucun chemin terrestre n'existe, débarquement possible quand on domine la mer.
     func route(for army: Army, to target: Int, throughEnemy: Bool = false) -> (path: [Int], amphibious: Bool)? {
         guard target != army.province, ProvinceMap.all.indices.contains(target) else { return nil }
-        let owner = army.owner
+        let owner = army.side
         let foes = enemies(of: owner)
         var allowedCache: [CountryID: Bool] = [:]
         func allowed(_ p: Int) -> Bool {
             let c = controller(of: p)
             if let v = allowedCache[c] { return v }
-            let v = c == owner || foes.contains(c) || isFriendly(owner, c)
+            let v = c == owner || c == army.owner || foes.contains(c) || isFriendly(owner, c) || isFriendly(army.owner, c)
             allowedCache[c] = v
             return v
         }
@@ -332,11 +339,11 @@ extension Simulation {
             return (path.reversed(), false)
         }
         // Débarquement ou transport maritime : seulement d'une côte à une autre.
-        guard let me = state.countries[owner], me.navalPower > 0,
+        guard let me = state.countries[army.owner], me.navalPower > 0,
               ProvinceMap.all[target].coastal, ProvinceMap.all[army.province].coastal else { return nil }
         let destOwner = controller(of: target)
         if foes.contains(destOwner) {
-            guard navalShare(owner, vs: destOwner) >= 0.55, distanceKm(army.province, target) < 3500 else { return nil }
+            guard navalShare(army.owner, vs: destOwner) >= 0.55, distanceKm(army.province, target) < 3500 else { return nil }
         }
         return ([target], true)
     }
@@ -513,7 +520,8 @@ extension Simulation {
                                  divisions: half, path: [], progress: 0, organization: a.organization,
                                  daysInPlace: a.daysInPlace, engaged: false, amphibious: false,
                                  general: newGeneral, stance: a.stance,
-                                 experience: a.experience, training: a.training, supply: a.supply))
+                                 experience: a.experience, training: a.training, supply: a.supply,
+                                 servingFor: a.servingFor, covert: a.covert))
         state.nextArmyID += 1
         return ActionResult(success: true, message: "Armée divisée en deux.")
     }
@@ -614,7 +622,13 @@ extension Simulation {
                 continue
             }
             let holder = controller(of: next)
-            if foes(a.owner).contains(holder) {
+            if foes(a.side).contains(holder) {
+                if a.airdrop && a.progress < 1 {
+                    // Vol des avions de transport : 2 jours.
+                    a.progress += 0.5
+                    state.armies[i] = a
+                    continue
+                }
                 if a.amphibious && a.progress < 1 {
                     // Traversée avant le débarquement.
                     let days = distanceKm(a.province, next) / 300 + 5
@@ -625,7 +639,7 @@ extension Simulation {
                 a.engaged = true
                 attacks[next, default: []].append(i)
                 state.armies[i] = a
-            } else if holder == a.owner || isFriendly(a.owner, holder) {
+            } else if holder == a.owner || holder == a.side || isFriendly(a.side, holder) || isFriendly(a.owner, holder) {
                 var speed = (a.isMotorized ? 45.0 : 30.0) * (0.6 + 0.4 * (state.countries[a.owner]?.infrastructure ?? 0.5))
                 speed *= TerrainMap.terrain(next).movement * weather(at: next).movement
                 if a.supply < 0.4 { speed *= 0.7 }
@@ -677,11 +691,12 @@ extension Simulation {
 
     mutating func captureProvince(_ target: Int, by attackers: [Int], defenders: [Int], from loser: CountryID) {
         let province = ProvinceMap.all[target]
-        let winner = state.armies[attackers[0]].owner
+        let winner = state.armies[attackers[0]].side
+        let realConqueror = state.armies[attackers[0]].owner
         // Retraite des défenseurs vers une région amie voisine, sinon destruction.
         var destroyed: [Int] = []
         for j in defenders {
-            let owner = state.armies[j].owner
+            let owner = state.armies[j].side
             let retreat = province.neighbors.first { n in
                 let c = controller(of: n)
                 return c == owner || isFriendly(owner, c)
@@ -718,6 +733,12 @@ extension Simulation {
         state.annexedProvinces.remove(target)
         state.provinceOrg[target] = 0.3
         if let f = state.forts[target] { state.forts[target] = f > 1 ? f - 1 : nil }
+        // Conquête faite par un corps expéditionnaire : la région va au pays aidé, mais on sait qui l'a prise.
+        if realConqueror != winner && realConqueror == state.playerID {
+            state.proxyConquests[target] = realConqueror
+        } else {
+            state.proxyConquests[target] = nil
+        }
         state.constructions.removeAll { $0.province == target }
         recomputeTerritory(province.country)
         // Les vainqueurs entrent dans la région.
@@ -729,6 +750,7 @@ extension Simulation {
             state.armies[i].progress = 0
             state.armies[i].engaged = false
             state.armies[i].amphibious = false
+            state.armies[i].airdrop = false
             state.armies[i].daysInPlace = 0
         }
         if winner == state.playerID {

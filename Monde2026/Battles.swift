@@ -393,18 +393,18 @@ extension Simulation {
         var warCache: [CountryID: Bool] = [:]
         for i in state.armies.indices {
             let a = state.armies[i]
-            let atWar = warCache[a.owner] ?? isAtWar(a.owner)
-            warCache[a.owner] = atWar
+            let atWar = warCache[a.side] ?? isAtWar(a.side)
+            warCache[a.side] = atWar
             guard atWar else {
                 state.armies[i].supply = 1
                 continue
             }
-            let key = "\(a.owner)-\(a.province)-\(a.general.trait == .logistician)"
+            let key = "\(a.side)-\(a.province)-\(a.general.trait == .logistician)"
             if let v = cache[key] {
                 state.armies[i].supply = v
                 continue
             }
-            let v = supplyLevel(owner: a.owner, at: a.province, logistician: a.general.trait == .logistician)
+            let v = supplyLevel(owner: a.side, at: a.province, logistician: a.general.trait == .logistician)
             cache[key] = v
             if a.owner == state.playerID && v <= 0.15 && a.supply > 0.15 {
                 addEvent("⛓️ \(a.name) est encerclée à \(ProvinceMap.all[a.province].name) : plus de ravitaillement !", important: true)
@@ -505,12 +505,12 @@ extension Simulation {
         let attackersAll = attackerIndices.filter { state.armies.indices.contains($0) }
         guard !attackersAll.isEmpty, state.countries[defenderCountry] != nil else { return }
         let defenderFoes = enemies(of: defenderCountry)
-        let attackers = attackersAll.filter { defenderFoes.contains(state.armies[$0].owner) }
+        let attackers = attackersAll.filter { defenderFoes.contains(state.armies[$0].side) }
         guard !attackers.isEmpty else { return }
         let defenders = state.armies.indices.filter { j in
-            state.armies[j].province == target && isFriendly(defenderCountry, state.armies[j].owner) && !attackers.contains(j)
+            state.armies[j].province == target && isFriendly(defenderCountry, state.armies[j].side) && !attackers.contains(j)
         }
-        let leadOwner = attackers.max { state.armies[$0].count < state.armies[$1].count }.map { state.armies[$0].owner } ?? state.armies[attackers[0]].owner
+        let leadOwner = attackers.max { state.armies[$0].count < state.armies[$1].count }.map { state.armies[$0].side } ?? state.armies[attackers[0]].side
         let attArmies = attackers.map { state.armies[$0] }
         let defArmies = defenders.map { state.armies[$0] }
         let terrain = TerrainMap.terrain(target)
@@ -586,7 +586,7 @@ extension Simulation {
         for a in attArmies {
             let v = armyAttack(a, vsHardness: defHardness)
             attack += v
-            if a.amphibious { amphibiousWeight += v }
+            if a.amphibious || a.airdrop { amphibiousWeight += v }
             if TerrainMap.river(a.province, target) && !a.amphibious { riverWeight += v }
             supplySum += v * (0.45 + 0.55 * a.supply)
             var g = 1 + 0.025 * Double(a.general.skill)
@@ -606,6 +606,7 @@ extension Simulation {
         addA("Ravitaillement", supplySum / base)
         addA("Généraux", generalSum / base)
         addA("Posture", stanceSum / base)
+        if fronts >= 2 { addA("Attaque de \(fronts) côtés", min(1.25, 1 + 0.08 * Double(fronts - 1))) }
         let air = airSuperiority(leadOwner, defenderCountry)
         addA("Maîtrise du ciel", 1 + 0.2 * (air - 0.5))
         if battle.airStrikeSide == leadOwner && today <= battle.airStrikeUntil { addA("Frappes aériennes", 1.15) }
@@ -653,6 +654,7 @@ extension Simulation {
         let fort = fortLevel(target)
         if fort > 0 { addD("Fort niveau \(fort)", 1 + 0.15 * Double(fort)) }
         addD("Maîtrise du ciel", 1 - 0.2 * (air - 0.5))
+        if state.bombardments[target] != nil { addD("Sous les bombes", 0.85) }
         if battle.airStrikeSide == defenderCountry && today <= battle.airStrikeUntil { addD("Frappes aériennes", 1.15) }
         addD("Tactique : \(defTactic.name.lowercased())", tacticValue(defTactic, armies: defArmies, owner: defenderCountry, province: target))
         // `defense` contient déjà les facteurs des armées ; on applique le reste.
@@ -742,7 +744,12 @@ extension Simulation {
             for j in defenders { state.armies[j].general.xp += 4 }
             state.battles[target] = nil
             if attackers.contains(where: { state.armies[$0].owner == state.playerID }) {
-                addEvent("🛡️ Notre offensive sur \(ProvinceMap.all[target].name) est repoussée.", important: true)
+                // Pourquoi on a perdu : ce qui a le plus aidé la défense ou gêné l'attaque.
+                let why = (defMods.filter { $0.value > 1.05 }.map { ($0.name, $0.value - 1) }
+                         + attMods.filter { $0.value < 0.95 }.map { ($0.name, 1 - $0.value) })
+                    .sorted { $0.1 > $1.1 }.prefix(3).map { $0.0.lowercased() }
+                let hint = why.isEmpty ? "" : " En cause : " + why.joined(separator: ", ") + "."
+                addEvent("🛡️ Notre offensive sur \(ProvinceMap.all[target].name) est repoussée.\(hint) Essayez la tenaille, un bombardement ou plus de divisions.", important: true)
             } else if defenderCountry == state.playerID {
                 addEvent("🛡️ Nous tenons \(ProvinceMap.all[target].name) : l'assaut de \(name(leadOwner)) est brisé.", important: false)
             }
@@ -864,6 +871,9 @@ extension Simulation {
 
     func playerSide(in b: Battle) -> Int {
         guard let p = state.playerID else { return 0 }
+        // Nos corps expéditionnaires comptent aussi.
+        if state.armies.contains(where: { $0.owner == p && $0.servingFor != nil && $0.engaged && $0.path.first == b.province }) { return 1 }
+        if state.armies.contains(where: { $0.owner == p && $0.servingFor != nil && $0.province == b.province }) { return -1 }
         if b.attacker == p || isFriendly(p, b.attacker) { return 1 }
         if b.defender == p || isFriendly(p, b.defender) { return -1 }
         return 0

@@ -351,6 +351,9 @@ struct CountrySidebar: View {
     @ViewBuilder
     private func overview(_ sim: Simulation, _ c: Country) -> some View {
         let gdp = sim.effectiveGDP(c.id)
+        if c.id != store.playerID {
+            QuickDiplomacyBar(store: store, sim: sim, target: c.id)
+        }
         FigureGrid(items: [
             ("PIB", Fmt.money(gdp), Theme.paper),
             ("Croissance", Fmt.signedPct(c.growth), c.growth >= 0 ? Theme.teal : Theme.coral),
@@ -747,6 +750,34 @@ struct PlacementBanner: View {
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.amber)
                 }
                 Button { store.placing = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.paper)
+                        .frame(width: 30, height: 30).background(Color.white.opacity(0.08), in: Circle())
+                }
+                .buttonStyle(Pressable())
+            }
+            .padding(12)
+            .frame(maxWidth: 520)
+            .glass(20)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+}
+
+
+/// Bandeau d'une opération militaire en attente de cible.
+struct OperationBanner: View {
+    @ObservedObject var store: GameStore
+
+    var body: some View {
+        if let op = store.armyOp {
+            HStack(spacing: 12) {
+                Image(systemName: op.icon).font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 38, height: 38)
+                    .background(Theme.coral, in: RoundedRectangle(cornerRadius: 10))
+                Text(op.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
+                Spacer(minLength: 8)
+                Button { store.armyOp = nil } label: {
                     Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.paper)
                         .frame(width: 30, height: 30).background(Color.white.opacity(0.08), in: Circle())
                 }

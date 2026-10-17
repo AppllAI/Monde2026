@@ -13,6 +13,7 @@ enum Panel: Identifiable, Hashable {
     case event(Int)
     case battle(Int)
     case army(Int)
+    case diplo(CountryID, DiploAction)
 
     var id: String {
         switch self {
@@ -29,6 +30,7 @@ enum Panel: Identifiable, Hashable {
         case .event(let e): return "event-\(e)"
         case .battle(let p): return "battle-\(p)"
         case .army(let a): return "army-\(a)"
+        case .diplo(let c, let a): return "diplo-\(c)-\(a.rawValue)"
         }
     }
 
@@ -44,6 +46,27 @@ enum Panel: Identifiable, Hashable {
     var isLive: Bool {
         if case .battle = self { return true }
         return false
+    }
+}
+
+/// Opérations qui demandent de toucher une région cible.
+enum ArmyOperation: String {
+    case bombard, airdrop, encircle
+
+    var title: String {
+        switch self {
+        case .bombard: return "Touchez la région à bombarder (6 jours de frappes)"
+        case .airdrop: return "Touchez la région où sauter (700 km au plus)"
+        case .encircle: return "Touchez la région à encercler (au moins 2 armées groupées)"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .bombard: return "burst.fill"
+        case .airdrop: return "parachute.fill"
+        case .encircle: return "arrow.triangle.merge"
+        }
     }
 }
 
@@ -100,6 +123,7 @@ final class GameStore: ObservableObject {
     @Published var placing: BuildingKind? {     // on choisit la région où construire
         didSet { refreshMap() }
     }
+    @Published var armyOp: ArmyOperation?       // opération en attente d'une région cible
     @Published private(set) var focus: MapFocus?
     private var focusCounter = 0
     @Published var satellite = false
@@ -378,6 +402,18 @@ final class GameStore: ObservableObject {
     func tapMap(_ point: GeoPoint) {
         guard let s = sim, let province = ProvinceMap.province(at: point) else {
             clearSelection()
+            return
+        }
+        if let op = armyOp, let lead = selectedArmy {
+            armyOp = nil
+            let ids = [lead] + armyGroup.sorted()
+            perform { sim, _ in
+                switch op {
+                case .bombard: return sim.bombard(province.id, from: lead)
+                case .airdrop: return sim.airdrop(lead, to: province.id)
+                case .encircle: return sim.encircle(province.id, with: ids)
+                }
+            }
             return
         }
         if let kind = placing {

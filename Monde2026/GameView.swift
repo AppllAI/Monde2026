@@ -45,6 +45,7 @@ struct GameView: View {
                         }
                     }
                     PlacementBanner(store: store)
+                    OperationBanner(store: store)
                     Spacer(minLength: 0)
                     if store.selectedArmy != nil {
                         ArmyCard(store: store)
@@ -84,6 +85,7 @@ struct GameView: View {
             .animation(spring, value: store.selectedArmy)
             .animation(spring, value: store.panel)
             .animation(spring, value: store.placing)
+            .animation(spring, value: store.armyOp)
             .animation(spring, value: store.mapTray)
             .onAppear { wideLayout = wide }
             .onChange(of: wide) { _, w in wideLayout = w }
@@ -392,6 +394,7 @@ struct PanelHost: View {
                 case .endGame: EndGamePanel(store: store)
                 case .battle(let province): BattlePanel(store: store, province: province)
                 case .army(let id): ArmyOrganizer(store: store, armyID: id)
+                case .diplo(let c, let a): DiploActionPanel(store: store, target: c, action: a)
                 }
                 }
                 .id(panel)
