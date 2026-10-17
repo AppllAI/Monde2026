@@ -151,7 +151,8 @@ final class UnitLayerView: UIView {
             counts[key, default: 0] += 1
         }
         let visibleRect = bounds.insetBy(dx: -80, dy: -80)
-        for t in snapshot.tokens {
+        var placed: [CGRect] = []
+        for t in snapshot.tokens.sorted(by: { ($0.isPlayer ? 0 : 1, $0.id) < ($1.isPlayer ? 0 : 1, $1.id) }) {
             guard let v = tokens[t.id] else { continue }
             let show = t.isPlayer || t.selected || showAll || t.engaged
             let key = "\(Int(t.point.x / 4000))-\(Int(t.point.y / 4000))"
@@ -162,6 +163,19 @@ final class UnitLayerView: UIView {
             let step = UnitTokenView.size.width * k + 3
             c.x += (CGFloat(i) - CGFloat(n - 1) / 2) * step
             v.isHidden = !show || !visibleRect.contains(c)
+            // Éviter que deux pions se recouvrent : on décale vers le haut ou le bas.
+            if !v.isHidden {
+                let size = CGSize(width: UnitTokenView.size.width * k, height: UnitTokenView.size.height * k)
+                var tries = 0
+                var offset: CGFloat = 0
+                func frame(_ y: CGFloat) -> CGRect { CGRect(x: c.x - size.width / 2, y: y - size.height / 2, width: size.width, height: size.height) }
+                while tries < 6, placed.contains(where: { $0.intersects(frame(c.y + offset).insetBy(dx: 2, dy: 2)) }) {
+                    tries += 1
+                    offset = (tries % 2 == 1 ? 1 : -1) * CGFloat((tries + 1) / 2) * (size.height + 2)
+                }
+                c.y += offset
+                placed.append(frame(c.y))
+            }
             v.center = c
             v.transform = CGAffineTransform(scaleX: k, y: k)
         }
@@ -347,7 +361,7 @@ final class UnitLayerView: UIView {
 // MARK: - Le pion
 
 final class UnitTokenView: UIView {
-    static let size = CGSize(width: 78, height: 32)
+    static let size = CGSize(width: 88, height: 32)
 
     var token: UnitToken { didSet { setNeedsDisplay(); updatePulse() } }
 
@@ -427,7 +441,7 @@ final class UnitTokenView: UIView {
         let fs = flag.size(withAttributes: fAttrs)
         flag.draw(at: CGPoint(x: flagBox.midX - fs.width / 2, y: flagBox.midY - fs.height / 2 - 1), withAttributes: fAttrs)
         // Pictogramme du type dominant
-        UnitArt.draw(token.mainType, in: CGRect(x: r.minX + 30, y: r.minY + 6, width: 24, height: 15), context: ctx)
+        UnitArt.draw(token.mainType, in: CGRect(x: r.minX + 31, y: r.minY + 6, width: 26, height: 16), context: ctx)
         // Effectif
         let count = "\(token.count)" as NSString
         let cAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 14, weight: .heavy),
@@ -435,12 +449,16 @@ final class UnitTokenView: UIView {
         let cs = count.size(withAttributes: cAttrs)
         count.draw(at: CGPoint(x: r.maxX - 8 - cs.width, y: r.midY - cs.height / 2 - 2), withAttributes: cAttrs)
         // Petits signes : entraînement ★, en marche ›, sur une frontière ▮
-        var badge: String?
-        if token.training { badge = "★" } else if token.moving { badge = "›" } else if token.onBorder { badge = "▮" }
-        if let b = badge as NSString? {
-            let bAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 10, weight: .black),
-                                                         .foregroundColor: UIColor(Theme.amber)]
-            b.draw(at: CGPoint(x: r.minX + 55, y: r.minY + 2), withAttributes: bAttrs)
+        var badge: UIColor?
+        if token.training { badge = UIColor(Theme.amber) } else if token.moving { badge = UIColor(Theme.sky) }
+        else if token.onBorder { badge = UIColor(Theme.teal) }
+        if let b = badge {
+            // Petit point d'état dans le coin : entraînement (or), en marche (bleu), tient une frontière (vert).
+            ctx.setFillColor(b.cgColor)
+            ctx.fillEllipse(in: CGRect(x: r.maxX - 11, y: r.minY - 1, width: 9, height: 9))
+            ctx.setStrokeColor(UIColor.black.withAlphaComponent(0.6).cgColor)
+            ctx.setLineWidth(1)
+            ctx.strokeEllipse(in: CGRect(x: r.maxX - 11, y: r.minY - 1, width: 9, height: 9))
         }
     }
 }
