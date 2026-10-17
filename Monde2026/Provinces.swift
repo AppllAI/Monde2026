@@ -75,7 +75,7 @@ enum ProvinceMap {
     // MARK: Lecture du fichier
 
     private static func load() -> ([Province], [ProvinceBorder]) {
-        guard let url = Bundle.main.url(forResource: "map", withExtension: "bin"),
+        guard let url = GameResources.url("map", "bin"),
               let data = try? Data(contentsOf: url) else {
             return ([], [])
         }

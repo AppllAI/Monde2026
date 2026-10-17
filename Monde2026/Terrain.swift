@@ -136,7 +136,7 @@ enum TerrainMap {
 
     private static func load() -> ([Terrain], Set<Int>, [Int: String], Bool) {
         let provinces = ProvinceMap.all
-        if let url = Bundle.main.url(forResource: "terrain", withExtension: "json"),
+        if let url = GameResources.url("terrain", "json"),
            let raw = try? Data(contentsOf: url),
            let file = try? JSONDecoder().decode(File.self, from: raw),
            file.regions == provinces.count, file.terrain.count == provinces.count {

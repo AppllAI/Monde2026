@@ -1,0 +1,94 @@
+name: Paquet iPad (Swift Playgrounds)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Monde2026/**"
+      - "Resources/**"
+      - "tools/make_swiftpm.sh"
+      - ".github/workflows/ipad.yml"
+      - "project.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ipad
+  cancel-in-progress: true
+
+jobs:
+  ipad:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fabriquer Monde2026.swiftpm
+        run: ./tools/make_swiftpm.sh build-ipad
+
+      - name: Vérifier que le paquet compile (comme Swift Playgrounds, en mode Debug)
+        run: |
+          mkdir -p /tmp/out
+          cd build-ipad/Monde2026.swiftpm
+          xcodebuild -list 2>&1 | tee /tmp/out/schemes.txt || true
+          set -o pipefail
+          xcodebuild -scheme "Monde 2026" -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug -derivedDataPath dd CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build.log || true
+          grep -E "error:|BUILD SUCCEEDED|BUILD FAILED" build.log | sort -u | head -200 > /tmp/out/errors.txt || true
+          if grep -q "BUILD SUCCEEDED" build.log; then echo OK > /tmp/out/status.txt; else echo ECHEC > /tmp/out/status.txt; fi
+          tail -c 60000 build.log > /tmp/out/build-tail.log
+          cat /tmp/out/status.txt
+
+      - name: Lancer le paquet dans un simulateur d'iPad
+        run: |
+          if ! grep -q OK /tmp/out/status.txt; then exit 0; fi
+          APP=$(find build-ipad/Monde2026.swiftpm/dd/Build/Products -name "*.app" -maxdepth 2 | head -1)
+          echo "App : $APP" | tee /tmp/out/run.txt
+          BUNDLE=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Info.plist")
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)['devices']
+          ipads = [x for k, v in d.items() if 'iOS' in k for x in v if 'iPad' in x['name']]
+          print(ipads[-1]['udid'] if ipads else '')")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          (xcrun simctl launch --console-pty "$UDID" $BUNDLE -selftest > selftest.log 2>&1 &)
+          for i in $(seq 1 180); do sleep 5; grep -q "SELFTEST FIN" selftest.log && break; done
+          grep -a "SELFTEST" selftest.log > /tmp/out/selftest.txt || true
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 3
+          sleep 40
+          xcrun simctl io "$UDID" screenshot /tmp/out/ipad-debug.png
+          if xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE"; then
+            echo "Jeu toujours lancé : OK" | tee -a /tmp/out/run.txt
+          else
+            echo "Le jeu s'est fermé" | tee -a /tmp/out/run.txt
+          fi
+
+      - name: Publier le zip dans la branche ipad
+        if: always()
+        run: |
+          cp build-ipad/Monde2026-iPad.zip /tmp/out/ || true
+          echo "${GITHUB_SHA}" > /tmp/out/commit.txt
+          cat > /tmp/out/README.md <<'MD'
+          # Monde 2026 pour iPad (Swift Playgrounds)
+
+          1. Touchez **Monde2026-iPad.zip** ci-dessus, puis **Download** (Télécharger).
+          2. Dans l'app **Fichiers** > Téléchargements, touchez le zip pour le décompresser.
+          3. Touchez **Monde2026** (le dossier .swiftpm) : il s'ouvre dans Swift Playgrounds.
+          4. Appuyez sur ▶︎ pour lancer le jeu.
+          MD
+          sed -i '' 's/^          //' /tmp/out/README.md
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git checkout --orphan ipad
+          git rm -rf . > /dev/null
+          rm -rf build-ipad Monde2026 Resources tools
+          cp /tmp/out/* .
+          git add -A .
+          git commit -m "Paquet iPad ${GITHUB_SHA}"
+          git push -f origin ipad

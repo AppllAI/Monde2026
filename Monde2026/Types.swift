@@ -450,3 +450,16 @@ enum WarPosture: String, Codable, CaseIterable {
         }
     }
 }
+
+// MARK: - Fichiers de données (application Xcode ou paquet Swift Playgrounds)
+
+enum GameResources {
+    static func url(_ name: String, _ ext: String) -> URL? {
+        if let u = Bundle.main.url(forResource: name, withExtension: ext) { return u }
+        #if SWIFT_PACKAGE
+        return Bundle.module.url(forResource: name, withExtension: ext)
+        #else
+        return nil
+        #endif
+    }
+}
