@@ -25,7 +25,7 @@ struct GameView: View {
                         if wide && store.selectedCountry != nil && store.selectedArmy == nil {
                             CountrySidebar(store: store)
                                 .frame(width: 350)
-                                .frame(maxHeight: geo.size.height * 0.62)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .transition(.move(edge: .leading).combined(with: .opacity))
                         }
                         Spacer(minLength: 0)
@@ -41,7 +41,7 @@ struct GameView: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else if !wide && store.selectedCountry != nil {
                         CountrySidebar(store: store)
-                            .frame(maxHeight: geo.size.height * 0.45)
+                            .fixedSize(horizontal: false, vertical: true)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                     HStack(alignment: .bottom) {
@@ -348,15 +348,17 @@ struct TutorialOverlay: View {
 
     private let pages: [(String, String, String)] = [
         ("globe.europe.africa", "La carte",
-         "Pincez pour zoomer, glissez pour vous déplacer. Chaque région est coloriée selon son propriétaire. Touchez une région pour ouvrir la fiche du pays."),
-        ("clock", "Le temps",
-         "En haut, choisissez la vitesse. Le jeu se met en pause quand un panneau est ouvert ou qu'un événement important arrive."),
-        ("square.grid.3x3", "Les panneaux",
-         "En bas : économie, politique, armée, industrie, recherche, diplomatie et état du monde. Commencez par le budget et la recherche."),
-        ("hand.raised", "La diplomatie",
-         "Avant chaque proposition, l'IA vous montre si elle accepterait et pourquoi. Les factions vous protègent : attaquer un membre, c'est attaquer tous les autres."),
-        ("trophy", "Le but",
-         "Remplissez vos objectifs nationaux et faites grimper votre score jusqu'en 2050. Votre pays peut aussi être conquis, ou son régime renversé.")
+         "Pincez pour zoomer, glissez pour vous déplacer. Touchez un pays : sa fiche s'ouvre à gauche (aperçu, armée, région). Dans une de vos régions, vous pouvez construire forts et bases."),
+        ("shield.lefthalf.filled", "Vos armées",
+         "Chaque pion est une armée (30 divisions maximum). Le symbole indique les troupes : croix = infanterie, ovale = blindés, les deux = mécanisée. Touchez un pion, puis une région pour l'y envoyer."),
+        ("hand.raised.fill", "Tracer un trajet",
+         "Gardez le pouce sur ✋ (à gauche) et touchez plusieurs régions de l'autre main : l'armée passera par chacune. Le cadenas garde ce mode sans tenir le bouton."),
+        ("flame.fill", "Les batailles",
+         "Une flèche relie l'attaquant à la région visée, et le badge ⚔︎ montre l'avancée de la prise. Plus vous engagez de divisions, plus vous frappez fort. Touchez le badge pour le détail."),
+        ("star.square.fill", "Bases et entraînement",
+         "Une armée envoyée à sa base s'entraîne deux fois plus vite qu'en campagne. L'expérience rend les troupes jusqu'à 40 % plus efficaces."),
+        ("square.grid.2x2", "Les sections",
+         "En bas : Économie, Armée, Diplomatie, Politique. Le temps ne s'arrête que lorsqu'une guerre vous concerne ou qu'une décision vous attend.")
     ]
 
     var body: some View {

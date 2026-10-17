@@ -306,8 +306,8 @@ struct CountrySidebar: View {
                     }
                     .pickerStyle(.segmented)
                 }
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Group {
                         if let c = country {
                             switch tab {
                             case 0: overview(sim, c)

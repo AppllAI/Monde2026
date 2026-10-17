@@ -808,7 +808,7 @@ extension Simulation {
         let front = frontierProvinces(id, enemies: foes)
         let threshold: Double
         switch c.posture {
-        case .offensive: threshold = 1.05
+        case .offensive: threshold = 0.95
         case .balanced: threshold = 1.25
         case .defensive: threshold = 1.9
         }

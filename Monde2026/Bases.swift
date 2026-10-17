@@ -135,7 +135,7 @@ extension Simulation {
         for war in state.wars where war.isActive {
             for id in war.attackers + war.defenders {
                 for p in frontierProvinces(id, enemies: enemies(of: id)) {
-                    state.forts[p] = max(fortLevel(p), 2)
+                    state.forts[p] = max(fortLevel(p), 1)
                 }
             }
         }
