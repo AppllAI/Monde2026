@@ -456,10 +456,16 @@ enum WarPosture: String, Codable, CaseIterable {
 enum GameResources {
     static func url(_ name: String, _ ext: String) -> URL? {
         if let u = Bundle.main.url(forResource: name, withExtension: ext) { return u }
-        #if SWIFT_PACKAGE
-        return Bundle.module.url(forResource: name, withExtension: ext)
-        #else
+        // Paquet Swift Playgrounds : les fichiers peuvent être dans un sous-dossier ou un bundle intégré.
+        if let u = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Resources") { return u }
+        for b in Bundle.allBundles + Bundle.allFrameworks {
+            if let u = b.url(forResource: name, withExtension: ext) { return u }
+        }
+        if let urls = Bundle.main.urls(forResourcesWithExtension: "bundle", subdirectory: nil) {
+            for u in urls {
+                if let inner = Bundle(url: u)?.url(forResource: name, withExtension: ext) { return inner }
+            }
+        }
         return nil
-        #endif
     }
 }
