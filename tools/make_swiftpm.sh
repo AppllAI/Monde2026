@@ -23,7 +23,7 @@ let package = Package(
             bundleIdentifier: "com.brrrr999.monde2026",
             displayVersion: "$VERSION",
             bundleVersion: "1",
-            appIcon: .placeholder(icon: .globe),
+            appIcon: .placeholder(icon: .map),
             accentColor: .presetColor(.orange),
             supportedDeviceFamilies: [.pad, .phone],
             supportedInterfaceOrientations: [
