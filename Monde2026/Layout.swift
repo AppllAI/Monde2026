@@ -608,6 +608,8 @@ struct Pressable: ButtonStyle {
 /// Trois cartes visibles à la fois, on fait défiler pour les autres.
 struct MapTray: View {
     @ObservedObject var store: GameStore
+    /// Trois cartes de 96 points et leurs espacements.
+    static let width: CGFloat = 314
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -647,11 +649,11 @@ struct MapTray: View {
                 }
                 .onAppear { proxy.scrollTo(store.mapMode, anchor: .center) }
             }
-            .frame(width: 3 * 96 + 2 * 8 + 10)
+            .frame(width: MapTray.width)
             LegendRow(mode: store.mapMode)
         }
         .padding(12)
-        .frame(width: 3 * 96 + 2 * 8 + 10 + 24)
+        .frame(width: MapTray.width + 24)
         .glass(20)
         .sensoryFeedback(.selection, trigger: store.mapMode)
     }
@@ -671,7 +673,7 @@ struct LegendRow: View {
                 }
             }
         }
-        .frame(width: 3 * 96 + 2 * 8 + 10, alignment: .leading)
+        .frame(width: MapTray.width, alignment: .leading)
     }
 
     private var entries: [(Color, String)] {
