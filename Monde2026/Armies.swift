@@ -471,7 +471,7 @@ extension Simulation {
         var guardCount = 0
         while armies(of: id).reduce(0, { $0 + $1.count }) < target && unassignedCount(id) > 0 && guardCount < 40 {
             guardCount += 1
-            let size = min(Army.maxDivisions, max(4, min(20, c.divisionCount / 4)))
+            let size = min(Army.maxDivisions, max(6, c.divisionCount / 3))
             let front = atWar ? Array(frontierProvinces(id, enemies: enemies(of: id))).sorted() : []
             let place: Int? = !front.isEmpty ? front[k % front.count] : (own.isEmpty ? nil : own[k % own.count])
             k += 1

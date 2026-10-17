@@ -118,12 +118,15 @@ struct PanelDrawer: View {
         PanelHost(store: store, panel: panel)
             .frame(maxHeight: .infinity, alignment: .top)
             .background(Theme.ink.opacity(0.97))
-            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 26, bottomLeadingRadius: 26, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Theme.line))
             .overlay(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.25)).frame(width: 5, height: 46).padding(.leading, 6)
             }
             .shadow(color: .black.opacity(0.45), radius: 24, x: -6)
-            .ignoresSafeArea(edges: .vertical)
+            .padding(.top, 70)
+            .padding(.bottom, 74)
+            .padding(.trailing, 12)
             .offset(x: max(0, drag))
             .gesture(
                 DragGesture(minimumDistance: 20)

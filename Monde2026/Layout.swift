@@ -651,6 +651,7 @@ struct MapTray: View {
             LegendRow(mode: store.mapMode)
         }
         .padding(12)
+        .frame(width: 3 * 96 + 2 * 8 + 10 + 24)
         .glass(20)
         .sensoryFeedback(.selection, trigger: store.mapMode)
     }
