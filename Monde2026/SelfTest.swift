@@ -107,6 +107,23 @@ enum SelfTest {
             log("sauvegarde : \(data.count / 1024) ko")
             if (try? Simulation(saveData: data)) != nil { log("rechargement OK") } else { log("rechargement ECHEC") }
         }
+        // Test des intrigues : la Pologne envoie des « volontaires » en Ukraine.
+        var spy = Simulation(playerID: "POL", difficulty: .normal)
+        if let a = spy.armies(of: "POL").first {
+            let r = spy.sendExpedition(a.id, to: "UKR", covert: true)
+            log("intrigue : \(r.message)")
+            let arms = spy.sendArms(to: "UKR", share: 0.05, covert: true)
+            log("intrigue : \(arms.message)")
+            let lend = spy.lendFactories(to: "UKR", share: 0.1, months: 6, covert: false)
+            log("intrigue : \(lend.message)")
+            spy.advance(days: 200)
+            let serving = spy.armies(of: "POL").filter { $0.servingFor == "UKR" }
+            log("intrigue : armées polonaises au service de l'Ukraine \(serving.count), conquêtes pour l'Ukraine \(spy.proxyRegions(for: "UKR").count), en guerre avec la Russie : \(spy.enemies(of: "POL").contains("RUS"))")
+            if !spy.proxyRegions(for: "UKR").isEmpty { log("intrigue : trahison → \(spy.betray("UKR").message)") }
+        }
+        let e = spy.evaluateJointAttack(partner: "LTU", target: "BLR", from: "POL")
+        log("intrigue : attaque conjointe Lituanie→Biélorussie : score \(Int(e.score))")
+        log("intrigue : ultimatum à la Biélorussie : score \(Int(spy.evaluateUltimatum(target: "BLR", from: "POL").score))")
         log("total \(String(format: "%.1f", Date().timeIntervalSince(start))) s")
         log("FIN")
     }

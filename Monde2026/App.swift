@@ -66,6 +66,7 @@ struct RootView: View {
                 switch LaunchOptions.value("-panel") {
                 case "industry"?: store.panel = .production
                 case "army"?: store.panel = .military
+                case "diplo"?: store.panel = .diplo("UKR", .expedition)
                 default: break
                 }
             }

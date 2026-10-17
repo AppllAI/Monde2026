@@ -89,6 +89,16 @@ jobs:
           xcrun simctl io "$UDID" screenshot /tmp/out/8-industrie.png
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -mapmode Diplomatie -inspect UKR
+          sleep 15
+          xcrun simctl io "$UDID" screenshot /tmp/out/10-diplomatie.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -panel diplo
+          sleep 15
+          xcrun simctl io "$UDID" screenshot /tmp/out/11-troupes.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
           xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 0 -panel army
           sleep 15
           xcrun simctl io "$UDID" screenshot /tmp/out/9-armee-panneau.png
