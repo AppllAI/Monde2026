@@ -287,7 +287,10 @@ extension Simulation {
         guard total > 0 else { return ActionResult(success: false, message: "Pas de réserves de ce type dans cette base.") }
         let r = createArmy(for: p, size: total, at: base, picked: picked)
         if r.success {
-            for (t, n) in picked { state.depots[base]?[t] = max(0, (state.depots[base]?[t] ?? 0) - n) }
+            for (t, n) in picked {
+                let have = state.depots[base]?[t] ?? 0
+                state.depots[base]?[t] = max(0, have - n)
+            }
             if let i = state.armies.indices.last {
                 state.armies[i].training = true
                 state.armies[i].stance = .defend
@@ -336,7 +339,8 @@ extension Simulation {
         let stock = depot(at: a.province)[type] ?? 0
         let n = min(count, stock, Army.maxDivisions - a.count)
         guard n > 0 else { return ActionResult(success: false, message: stock == 0 ? "Pas de réserve de ce type ici." : "Armée au complet.") }
-        state.depots[a.province]?[type] = stock - n
+        let left = stock - n
+        state.depots[a.province]?[type] = left
         state.armies[i].divisions[type, default: 0] += n
         return ActionResult(success: true, message: "")
     }
