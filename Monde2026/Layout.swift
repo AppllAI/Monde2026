@@ -44,6 +44,19 @@ struct TopBar: View {
                 }
                 Spacer(minLength: 4)
                 SpeedControl(store: store)
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { store.mapTray.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: store.mapMode.icon).font(.system(size: 13, weight: .semibold))
+                        if wide { Text("Carte").font(.system(size: 13, weight: .semibold)) }
+                    }
+                    .foregroundStyle(store.mapTray ? Theme.ink : Theme.paper)
+                    .padding(.horizontal, 12).frame(height: 34)
+                    .background(store.mapTray ? Theme.amber : Color.white.opacity(0.07), in: Capsule())
+                }
+                .buttonStyle(Pressable())
+                .accessibilityLabel("Changer de carte")
                 GameMenu(store: store)
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
@@ -91,21 +104,6 @@ struct MapControls: View {
                     .accessibilityLabel("Batailles en cours : \(battles.count)")
                 }
             }
-            Menu {
-                ForEach(MapMode.allCases) { mode in
-                    Button {
-                        store.mapMode = mode
-                    } label: {
-                        Label(mode.rawValue, systemImage: store.mapMode == mode ? "checkmark" : mode.icon)
-                    }
-                }
-            } label: {
-                Image(systemName: store.mapMode.icon).font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(store.mapMode == .political ? Theme.paper : Theme.amber)
-                    .frame(width: 48, height: 48)
-                    .glass(24)
-            }
-            .accessibilityLabel("Mode de carte : \(store.mapMode.rawValue)")
             round("location.fill", "Centrer sur mon pays") {
                 if let p = store.playerID { store.focusOn(p) }
             }
@@ -122,7 +120,7 @@ struct MapControls: View {
                 .frame(width: 48, height: 48)
                 .glass(24)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Pressable())
         .accessibilityLabel(label)
     }
 }
@@ -208,7 +206,9 @@ struct SectionDock: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(GameSection.allCases, id: \.self) { section in
-                Button { store.open(section.tabs[0].1) } label: {
+                Button {
+                    if let current = store.panel, GameSection.of(current) == section { store.panel = nil } else { store.open(section.tabs[0].1) }
+                } label: {
                     HStack(spacing: 8) {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: section.icon).font(.system(size: 17, weight: .medium))
@@ -221,16 +221,22 @@ struct SectionDock: View {
                         }
                         Text(section.title).font(.system(size: 13, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.7)
                     }
-                    .foregroundStyle(Theme.paper)
+                    .foregroundStyle(isOpen(section) ? Theme.ink : Theme.paper)
                     .frame(maxWidth: .infinity, minHeight: 46)
+                    .background(isOpen(section) ? Theme.amber : Color.clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(Pressable())
             }
         }
         .padding(4)
         .glass(26)
         .frame(maxWidth: 640)
+    }
+
+    private func isOpen(_ section: GameSection) -> Bool {
+        guard let p = store.panel else { return false }
+        return GameSection.of(p) == section
     }
 
     private var inboxCount: Int {
@@ -253,7 +259,7 @@ struct SectionTabs: View {
         if let section = GameSection.of(panel), section.tabs.count > 1 {
             HStack(spacing: 4) {
                 ForEach(section.tabs, id: \.0) { tab in
-                    Button { store.panel = tab.1 } label: {
+                    Button { withAnimation(.snappy) { store.panel = tab.1 } } label: {
                         Text(tab.0).font(.system(size: 13, weight: .semibold))
                             .frame(maxWidth: .infinity).padding(.vertical, 9)
                             .foregroundStyle(panel == tab.1 ? Theme.ink : Theme.paper)
@@ -472,6 +478,7 @@ struct RegionDetail: View {
                     Meter(value: job.progress, tint: Theme.amber)
                 }
             }
+            RegionIndustry(store: store, sim: sim, province: province)
             if mine, let pid = store.playerID {
                 VStack(spacing: 8) {
                     buildButton(.fort, pid)
@@ -580,5 +587,172 @@ extension Simulation {
 
     func fortCount(_ id: CountryID) -> Int {
         state.forts.keys.filter { controller(of: $0) == id }.count
+    }
+}
+
+
+// MARK: - Effet d'appui (tout bouton réagit sous le doigt)
+
+struct Pressable: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Sélecteur de cartes (en haut à droite)
+
+/// S'ouvre sous le bouton « Carte » ; reste ouvert jusqu'à ce qu'on retouche le bouton ou la croix.
+/// Trois cartes visibles à la fois, on fait défiler pour les autres.
+struct MapTray: View {
+    @ObservedObject var store: GameStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Cartes").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.steel)
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { store.mapTray = false }
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.paper)
+                        .frame(width: 26, height: 26).background(Color.white.opacity(0.08), in: Circle())
+                }
+                .buttonStyle(Pressable())
+                .accessibilityLabel("Fermer le sélecteur de cartes")
+            }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(MapMode.allCases) { mode in
+                            let on = store.mapMode == mode
+                            Button {
+                                withAnimation(.snappy) { store.mapMode = mode }
+                            } label: {
+                                VStack(spacing: 6) {
+                                    Image(systemName: mode.icon).font(.system(size: 18, weight: .semibold))
+                                    Text(mode.rawValue).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                                }
+                                .foregroundStyle(on ? Theme.ink : Theme.paper)
+                                .frame(width: 96, height: 62)
+                                .background(on ? Theme.amber : Color.white.opacity(0.06),
+                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(Pressable())
+                            .id(mode)
+                        }
+                    }
+                }
+                .onAppear { proxy.scrollTo(store.mapMode, anchor: .center) }
+            }
+            .frame(width: 3 * 96 + 2 * 8 + 10)
+            LegendRow(mode: store.mapMode)
+        }
+        .padding(12)
+        .glass(20)
+        .sensoryFeedback(.selection, trigger: store.mapMode)
+    }
+}
+
+/// Légende du mode de carte, en une ou deux lignes.
+struct LegendRow: View {
+    let mode: MapMode
+
+    var body: some View {
+        let items = entries
+        FlowLayout(spacing: 8) {
+            ForEach(items.indices, id: \.self) { i in
+                HStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 3).fill(items[i].0).frame(width: 12, height: 9)
+                    Text(items[i].1).font(.system(size: 10.5)).foregroundStyle(Theme.paper.opacity(0.85))
+                }
+            }
+        }
+        .frame(width: 3 * 96 + 2 * 8 + 10, alignment: .leading)
+    }
+
+    private var entries: [(Color, String)] {
+        switch mode {
+        case .political: return [(Theme.coral, "Front"), (Theme.amber, "Vos frontières"), (Color(uiColor: Theme.rebelLand), "Rebelles")]
+        case .relations: return [(Theme.teal, "Amis"), (Theme.steel, "Neutres"), (Theme.coral, "Hostiles")]
+        case .trade: return [(Theme.teal, "Accord commercial"), (Theme.sky, "Bonnes relations"), (Theme.coral, "Sanctions")]
+        case .conflicts: return [(Theme.teal, "Votre camp"), (Theme.coral, "Vos ennemis"),
+                                 (Color(red: 0.93, green: 0.55, blue: 0.22), "Autres guerres")]
+        case .allies: return [(Theme.teal, "Alliés"), (Theme.sky, "Garanties"), (Theme.steel, "Non-agression"), (Theme.coral, "Ennemis")]
+        case .alliances: return [(Theme.blocColor("OTAN"), "OTAN"), (Theme.blocColor("OTSC"), "OTSC"),
+                                 (Theme.blocColor("USA-ALLY"), "Alliés US"), (Theme.blocColor("CHN-ALLY"), "Proches Pékin/Moscou")]
+        case .economy: return [(Theme.teal, "Croissance"), (Theme.steel, "Stagnation"), (Theme.coral, "Récession")]
+        case .military: return [(Theme.amber, "Puissante"), (Theme.steel, "Faible"), (Theme.coral, "En guerre")]
+        case .industry: return [(Color(red: 0.42, green: 0.80, blue: 0.95), "Régions industrielles"), (Theme.steel.opacity(0.5), "Sans usines")]
+        case .terrain: return Terrain.allCases.map { t in (Color(red: t.rgb.0, green: t.rgb.1, blue: t.rgb.2), t.name) }
+        }
+    }
+}
+
+/// Disposition en lignes qui passent à la ligne quand il n'y a plus de place.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 300
+        var x: CGFloat = 0, y: CGFloat = 0, row: CGFloat = 0
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            if x + s.width > width && x > 0 { x = 0; y += row + 6; row = 0 }
+            x += s.width + spacing
+            row = max(row, s.height)
+        }
+        return CGSize(width: width, height: y + row)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, row: CGFloat = 0
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            if x + s.width > bounds.maxX && x > bounds.minX { x = bounds.minX; y += row + 6; row = 0 }
+            v.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
+            x += s.width + spacing
+            row = max(row, s.height)
+        }
+    }
+}
+
+// MARK: - Bandeau du mode placement
+
+struct PlacementBanner: View {
+    @ObservedObject var store: GameStore
+
+    var body: some View {
+        if let kind = store.placing {
+            HStack(spacing: 12) {
+                Image(systemName: kind.icon).font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 38, height: 38)
+                    .background(Color(red: kind.rgb.0, green: kind.rgb.1, blue: kind.rgb.2), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Où construire : \(kind.name) ?").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
+                    Text("Touchez une région en surbrillance.").font(.system(size: 11)).foregroundStyle(Theme.steel)
+                }
+                Spacer(minLength: 8)
+                if let sim = store.sim, let p = store.playerID, let best = sim.suggestedRegion(for: kind, id: p) {
+                    Button("Au mieux") {
+                        store.placing = nil
+                        store.perform { s, p in s.build(kind, at: best, for: p) }
+                    }
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.amber)
+                }
+                Button { store.placing = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.paper)
+                        .frame(width: 30, height: 30).background(Color.white.opacity(0.08), in: Circle())
+                }
+                .buttonStyle(Pressable())
+            }
+            .padding(12)
+            .frame(maxWidth: 520)
+            .glass(20)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
     }
 }

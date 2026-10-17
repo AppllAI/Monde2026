@@ -199,7 +199,7 @@ extension Simulation {
         var points = max(0, budget).squareRoot() * 12 * (0.5 + c.tech)
         if c.has(.appliedAI) { points *= 1.1 }
         if c.has(.quantumComputing) { points *= 1.2 }
-        return points * stabilityFactor(c)
+        return points * stabilityFactor(c) * (state.industryCache[id]?.research ?? 1)
     }
 
     mutating func monthlyResearch(_ id: CountryID) {

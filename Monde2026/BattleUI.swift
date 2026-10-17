@@ -64,6 +64,7 @@ struct ArmyCard: View {
                                     store.perform { s, _ in s.sendToBase(id) }
                                 }
                             }
+                            QuietButton(title: "Réorganiser", icon: "arrow.left.arrow.right", tint: Theme.amber) { store.open(.army(id)) }
                             QuietButton(title: "Armées voisines", icon: "plus.circle") { store.groupNearby() }
                             QuietButton(title: "Tout le front", icon: "rectangle.3.group") { store.groupFront() }
                             QuietButton(title: "Diviser", icon: "square.split.2x1") {
@@ -698,5 +699,98 @@ struct BattleRow: View {
         }
         .padding(10)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Réorganiser une armée (division par division)
+
+/// Déplacer des divisions entre les armées d'une même région, ou entre l'armée et la réserve de la base.
+struct ArmyOrganizer: View {
+    @ObservedObject var store: GameStore
+    let armyID: Int
+
+    var body: some View {
+        let _ = store.version
+        if let sim = store.sim, let a = sim.state.armies.first(where: { $0.id == armyID }) {
+            let others = sim.state.armies.filter { $0.owner == a.owner && $0.province == a.province && $0.id != a.id }
+            let atBase = sim.hasBase(a.province, for: a.owner)
+            let depot = sim.depot(at: a.province)
+            PanelHeader(title: a.name, subtitle: "\(a.count)/\(Army.maxDivisions) divisions · \(ProvinceMap.all[a.province].name)",
+                        flag: a.owner) { store.panel = nil }
+            Text("Touchez ← ou → pour faire passer une division d'un côté à l'autre. Seules les forces d'une même région peuvent s'échanger des divisions.")
+                .font(Theme.small).foregroundStyle(Theme.steel)
+            if atBase {
+                exchange(sim, a, title: "Réserve de la base", subtitle: "Divisions prêtes, hors armée", other: depot, otherID: nil)
+            }
+            ForEach(others) { o in
+                exchange(sim, a, title: o.name, subtitle: "\(o.count)/\(Army.maxDivisions) · \(o.general.name)", other: o.divisions, otherID: o.id)
+            }
+            if !atBase && others.isEmpty {
+                Dossier(title: "Personne à côté") {
+                    Text("Amenez une autre armée dans \(ProvinceMap.all[a.province].name), ou envoyez celle-ci à une base pour puiser dans la réserve.")
+                        .font(Theme.small).foregroundStyle(Theme.steel)
+                    QuietButton(title: "Rentrer à la base", icon: "star.square", tint: Theme.amber) {
+                        store.perform { s, _ in s.sendToBase(armyID) }
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                ActionButton(title: "Diviser en deux", icon: "square.split.2x1", tint: Theme.sky) {
+                    store.perform { s, _ in s.splitArmy(armyID) }
+                }
+                if !others.isEmpty {
+                    ActionButton(title: "Tout fusionner", icon: "square.stack.3d.up", tint: Theme.teal) {
+                        store.perform { s, _ in s.mergeArmies(at: armyID) }
+                    }
+                }
+            }
+        } else {
+            PanelHeader(title: "Armée dissoute") { store.panel = nil }
+        }
+    }
+
+    private func exchange(_ sim: Simulation, _ a: Army, title: String, subtitle: String,
+                          other: [DivisionType: Int], otherID: Int?) -> some View {
+        Dossier(title: title, subtitle: subtitle) {
+            HStack {
+                Text(a.name).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.amber)
+                Spacer()
+                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.steel)
+            }
+            ForEach(DivisionType.allCases.filter { (a.divisions[$0] ?? 0) + (other[$0] ?? 0) > 0 }, id: \.self) { t in
+                let mine = a.divisions[t] ?? 0
+                let theirs = other[t] ?? 0
+                HStack(spacing: 8) {
+                    Text("\(mine)").font(Theme.data(16, weight: .bold)).foregroundStyle(Theme.paper).frame(width: 34)
+                    arrow("arrow.left", enabled: theirs > 0 && a.count < Army.maxDivisions) {
+                        store.perform { s, _ in
+                            if let o = otherID { return s.transferDivisions(t, count: 1, from: o, to: a.id) }
+                            return s.reinforceFromDepot(a.id, type: t, count: 1)
+                        }
+                    }
+                    Spacer()
+                    HStack(spacing: 6) {
+                        UnitSymbol(type: t, color: Theme.steel.opacity(0.6), size: 22)
+                        Text(t.name).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.paper)
+                    }
+                    Spacer()
+                    arrow("arrow.right", enabled: mine > 0) {
+                        store.perform { s, _ in s.transferDivisions(t, count: 1, from: a.id, to: otherID) }
+                    }
+                    Text("\(theirs)").font(Theme.data(16, weight: .bold)).foregroundStyle(Theme.paper).frame(width: 34)
+                }
+            }
+        }
+    }
+
+    private func arrow(_ icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 15, weight: .bold))
+                .foregroundStyle(enabled ? Theme.ink : Theme.steel.opacity(0.4))
+                .frame(width: 44, height: 38)
+                .background(enabled ? Theme.amber : Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(Pressable())
+        .disabled(!enabled)
     }
 }

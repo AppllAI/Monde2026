@@ -11,9 +11,9 @@ struct ProductionPanel: View {
     var body: some View {
         if let sim = store.sim, let c = store.player {
             PanelHeader(title: "Industrie", subtitle: c.name, flag: c.id) { store.panel = nil }
-            overview(sim, c)
+            IndustryCard(store: store, sim: sim, country: c)
             ProductionLinesCard(store: store, country: c)
-            ConstructionCard(store: store, sim: sim, country: c)
+            overview(sim, c)
         }
     }
 

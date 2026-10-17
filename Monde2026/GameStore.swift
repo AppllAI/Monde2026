@@ -12,6 +12,7 @@ enum Panel: Identifiable, Hashable {
     case country(CountryID)
     case event(Int)
     case battle(Int)
+    case army(Int)
 
     var id: String {
         switch self {
@@ -27,6 +28,15 @@ enum Panel: Identifiable, Hashable {
         case .country(let c): return "country-" + c
         case .event(let e): return "event-\(e)"
         case .battle(let p): return "battle-\(p)"
+        case .army(let a): return "army-\(a)"
+        }
+    }
+
+    /// Panneau qui arrête le temps (une décision à prendre).
+    var isModal: Bool {
+        switch self {
+        case .event, .endGame: return true
+        default: return false
         }
     }
 
@@ -39,10 +49,14 @@ enum Panel: Identifiable, Hashable {
 
 enum MapMode: String, CaseIterable, Identifiable {
     case political = "Pays"
+    case relations = "Diplomatie"
+    case trade = "Commerce"
+    case conflicts = "Conflits"
+    case allies = "Alliés"
     case alliances = "Factions"
-    case relations = "Relations"
     case economy = "Économie"
-    case military = "Armées"
+    case military = "Puissance"
+    case industry = "Industrie"
     case terrain = "Terrain"
 
     var id: String { rawValue }
@@ -55,6 +69,10 @@ enum MapMode: String, CaseIterable, Identifiable {
         case .economy: return "chart.line.uptrend.xyaxis"
         case .military: return "scope"
         case .terrain: return "mountain.2.fill"
+        case .trade: return "shippingbox.fill"
+        case .conflicts: return "flame.fill"
+        case .allies: return "person.2.fill"
+        case .industry: return "building.2.fill"
         }
     }
 }
@@ -78,6 +96,10 @@ final class GameStore: ObservableObject {
     @Published var armyGroup: Set<Int> = []    // armées commandées avec l'armée sélectionnée
     @Published var waypointMode = false         // chaque région touchée s'ajoute au trajet
     @Published var waypointLocked = false       // mode étapes verrouillé (sans garder le doigt)
+    @Published var mapTray = false              // le sélecteur de cartes est ouvert
+    @Published var placing: BuildingKind? {     // on choisit la région où construire
+        didSet { refreshMap() }
+    }
     @Published private(set) var focus: MapFocus?
     private var focusCounter = 0
     @Published var satellite = false
@@ -122,7 +144,7 @@ final class GameStore: ObservableObject {
                 let delay = self?.delay ?? 300_000_000
                 try? await Task.sleep(nanoseconds: delay)
                 guard let self else { return }
-                if self.speed > 0 && (self.panel == nil || self.panel?.isLive == true) {
+                if self.speed > 0 && self.panel?.isModal != true {
                     self.step(days: self.speed == 3 ? 2 : 1)
                 }
             }
@@ -220,7 +242,7 @@ final class GameStore: ObservableObject {
     func perform(_ body: (inout Simulation, CountryID) -> ActionResult) {
         guard sim != nil, let p = playerID else { return }
         let result = body(&sim!, p)
-        feedback = result.message
+        feedback = result.message.isEmpty ? nil : result.message
         version += 1
         refreshMap()
         collectEvents()
@@ -228,6 +250,13 @@ final class GameStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 3_500_000_000)
             if self?.feedback == result.message { self?.feedback = nil }
         }
+    }
+
+    /// Choisir la région d'un nouveau bâtiment : le panneau se ferme, les régions possibles s'allument.
+    func startPlacing(_ kind: BuildingKind) {
+        panel = nil
+        selectedArmy = nil
+        placing = kind
     }
 
     func open(_ p: Panel) {
@@ -244,8 +273,12 @@ final class GameStore: ObservableObject {
         }
         var selected = selectedCountry
         if case .country(let id)? = panel { selected = id }
+        var highlight: Set<Int> = []
+        if let kind = placing, let p = playerID {
+            highlight = Set((ProvinceMap.byCountry[p] ?? []).filter { s.canBuild(kind, at: $0, for: p) == nil })
+        }
         mapSnapshot = MapSnapshotBuilder.build(s, mode: mapMode, selected: selected, selectedProvince: selectedProvince,
-                                               selectedArmy: selectedArmy, group: armyGroup)
+                                               selectedArmy: selectedArmy, group: armyGroup, highlight: highlight)
     }
 
     func handleTap(_ tap: MapTap) {
@@ -345,6 +378,18 @@ final class GameStore: ObservableObject {
     func tapMap(_ point: GeoPoint) {
         guard let s = sim, let province = ProvinceMap.province(at: point) else {
             clearSelection()
+            return
+        }
+        if let kind = placing {
+            guard let p = playerID else { return }
+            if let reason = s.canBuild(kind, at: province.id, for: p) {
+                feedback = reason
+                return
+            }
+            placing = nil
+            selectedProvince = province.id
+            selectedCountry = p
+            perform { sim, p in sim.build(kind, at: province.id, for: p) }
             return
         }
         let here = s.playerArmies(in: province.id)

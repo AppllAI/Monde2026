@@ -316,10 +316,12 @@ extension Simulation {
         guard var c = state.countries[id] else { return }
         // Formation des nouvelles divisions
         var stillTraining: [TrainingBatch] = []
+        var arrived: [TrainingBatch] = []
         for var batch in c.training {
             batch.daysLeft -= 1
             if batch.daysLeft <= 0 {
                 c.divisions[batch.type, default: 0] += batch.count
+                arrived.append(batch)
             } else {
                 stillTraining.append(batch)
             }
@@ -332,6 +334,15 @@ extension Simulation {
             c.activePersonnel += min(deficit, c.availableManpower, flow)
         }
         state.countries[id] = c
+        // Les recrues du joueur apparaissent dans la base choisie.
+        if id == state.playerID {
+            for batch in arrived {
+                let b = batch.base.flatMap { hasBase($0, for: id) ? $0 : nil } ?? bases(of: id).first
+                if let b = b { state.depots[b, default: [:]][batch.type, default: 0] += batch.count }
+                let place = b.map { " à la base de \(ProvinceMap.all[$0].name)" } ?? ""
+                addEvent("🪖 \(batch.count) division(s) \(batch.type.name.lowercased()) prête(s)\(place).", important: true)
+            }
+        }
     }
 
     // MARK: Guerre

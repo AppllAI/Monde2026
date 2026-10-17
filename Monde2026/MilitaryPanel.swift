@@ -26,8 +26,8 @@ struct MilitaryPanel: View {
                 ArmiesCard(store: store, sim: sim, country: c)
                 BasesCard(store: store, sim: sim, country: c)
             case 1:
-                overview(sim, c)
                 DivisionsCard(store: store, country: c)
+                overview(sim, c)
                 ConscriptionCard(store: store, country: c)
             case 2:
                 BattlesCard(store: store)
@@ -107,43 +107,60 @@ struct WarsCard: View {
 struct DivisionsCard: View {
     @ObservedObject var store: GameStore
     let country: Country
+    @State private var base: Int = -1
 
     var body: some View {
-        Dossier(title: "Divisions", subtitle: "Une division s'entraîne avant d'arriver au front ; elle utilise le matériel en stock.") {
+        let bases = store.sim?.bases(of: country.id) ?? []
+        let target = bases.contains(base) ? base : (bases.first ?? -1)
+        Dossier(title: "Recruter", subtitle: "Choisissez la base où les recrues s'entraînent. Elles y apparaîtront, prêtes à former une armée.") {
+            if !bases.isEmpty {
+                Picker("Base d'arrivée", selection: Binding(get: { target }, set: { base = $0 })) {
+                    ForEach(bases, id: \.self) { b in Text("Base de \(ProvinceMap.all[b].name)").tag(b) }
+                }
+                .pickerStyle(.menu)
+                .tint(Theme.amber)
+            }
             ForEach(DivisionType.allCases, id: \.self) { type in
-                row(type)
+                row(type, base: target >= 0 ? target : nil)
             }
             if !country.training.isEmpty {
                 Text("À l'entraînement").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
                 ForEach(country.training.indices, id: \.self) { i in
                     let batch = country.training[i]
-                    Text("\(batch.count) × \(batch.type.name) : prêtes dans \(batch.daysLeft) jours")
-                        .font(Theme.small).foregroundStyle(Theme.steel)
+                    let total = Double(batch.totalDays ?? batch.type.trainingDays)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            UnitSymbol(type: batch.type, color: Theme.steel.opacity(0.6), size: 20)
+                            Text("\(batch.count) × \(batch.type.name)").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.paper)
+                            Spacer()
+                            Text(batch.base.map { "→ \(ProvinceMap.all[$0].name) · \(batch.daysLeft) j" } ?? "\(batch.daysLeft) j")
+                                .font(Theme.data(11)).foregroundStyle(Theme.steel)
+                        }
+                        Meter(value: 1 - Double(batch.daysLeft) / max(1, total), tint: Theme.amber, height: 4)
+                    }
                 }
             }
         }
     }
 
-    private func row(_ type: DivisionType) -> some View {
+    private func row(_ type: DivisionType, base: Int?) -> some View {
         let count = country.divisions[type] ?? 0
         let men = type.stats.manpower
         let canRecruit = country.availableManpower >= men
         let id = country.id
+        let days = Int(Double(type.trainingDays) * (store.sim?.state.industryCache[id]?.training ?? 1))
         return HStack(spacing: 10) {
+            UnitSymbol(type: type, color: Theme.steel.opacity(0.6), size: 26)
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(type.name) : \(count)").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.paper)
-                Text("\(Fmt.troops(men)) hommes, \(type.trainingDays) jours d'entraînement")
-                    .font(Theme.small).foregroundStyle(Theme.steel)
+                Text("\(Fmt.troops(men)) hommes · \(days) jours").font(Theme.small).foregroundStyle(Theme.steel)
             }
             Spacer()
-            stepButton("minus", enabled: count > 0) {
-                store.mutate { $0.disband(type, count: 1, for: id) }
-            }
             stepButton("plus", enabled: canRecruit) {
-                store.mutate { _ = $0.recruit(type, count: 1, for: id) }
+                store.mutate { _ = $0.recruit(type, count: 1, for: id, base: base) }
             }
             stepButton("plus.square.on.square", enabled: country.availableManpower >= men * 5) {
-                store.mutate { _ = $0.recruit(type, count: 5, for: id) }
+                store.mutate { _ = $0.recruit(type, count: 5, for: id, base: base) }
             }
         }
     }
@@ -151,11 +168,11 @@ struct DivisionsCard: View {
     private func stepButton(_ icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 14, weight: .bold))
-                .frame(width: 36, height: 32)
+                .frame(width: 40, height: 36)
                 .foregroundStyle(enabled ? Theme.paper : Theme.steel.opacity(0.5))
                 .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Pressable())
         .disabled(!enabled)
     }
 }
@@ -283,7 +300,7 @@ struct ArmiesCard: View {
     }
 }
 
-/// Former une armée soi-même : choisir le nombre de divisions de chaque type (30 au maximum) et la base de départ.
+/// Former une armée soi-même, dans une base, avec les réserves qui s'y trouvent (30 divisions au maximum).
 struct ArmyBuilderCard: View {
     @ObservedObject var store: GameStore
     let sim: Simulation
@@ -292,57 +309,75 @@ struct ArmyBuilderCard: View {
     @State private var base: Int = -1
 
     var body: some View {
-        let reserve = sim.unassignedDivisions(country.id)
-        let total = pick.values.reduce(0, +)
         let bases = sim.bases(of: country.id)
+        let chosen = bases.contains(base) ? base : (bases.max { sim.depot(at: $0).values.reduce(0, +) < sim.depot(at: $1).values.reduce(0, +) } ?? -1)
+        let reserve = chosen >= 0 ? sim.depot(at: chosen) : [:]
+        let total = pick.values.reduce(0, +)
         Dossier(title: "Former une armée",
-                subtitle: "Réserve : \(reserve.values.reduce(0, +)) divisions. Elles défendent vos régions tant qu'elles ne sont pas en armée.") {
-            ForEach(DivisionType.allCases.filter { (reserve[$0] ?? 0) > 0 }, id: \.self) { t in
-                let available = reserve[t] ?? 0
-                let n = pick[t] ?? 0
-                HStack(spacing: 10) {
-                    UnitSymbol(type: t, color: Theme.steel.opacity(0.6), size: 26)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(t.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.paper)
-                        Text("\(available) en réserve").font(.system(size: 10)).foregroundStyle(Theme.steel)
+                subtitle: "Les recrues attendent dans les bases. On y forme les armées, qui partent ensuite où vous voulez.") {
+            if bases.isEmpty {
+                Text("Aucune base : touchez une de vos régions et construisez-en une.").font(Theme.small).foregroundStyle(Theme.coral)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(bases, id: \.self) { b in
+                            let n = sim.depot(at: b).values.reduce(0, +)
+                            Button { base = b; pick = [:] } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Label(ProvinceMap.all[b].name, systemImage: "star.square.fill").font(.system(size: 12, weight: .semibold))
+                                    Text("\(n) en réserve").font(.system(size: 10))
+                                }
+                                .foregroundStyle(chosen == b ? Theme.ink : Theme.paper)
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .background(chosen == b ? Theme.amber : Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(Pressable())
+                        }
                     }
+                }
+                if reserve.values.reduce(0, +) == 0 {
+                    Text("Pas de réserve ici. Recrutez (onglet Recrutement) en choisissant cette base.").font(Theme.small).foregroundStyle(Theme.steel)
+                }
+                ForEach(DivisionType.allCases.filter { (reserve[$0] ?? 0) > 0 }, id: \.self) { t in
+                    let available = reserve[t] ?? 0
+                    let n = min(pick[t] ?? 0, available)
+                    HStack(spacing: 10) {
+                        UnitSymbol(type: t, color: Theme.steel.opacity(0.6), size: 26)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(t.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.paper)
+                            Text("\(available) dans la base").font(.system(size: 10)).foregroundStyle(Theme.steel)
+                        }
+                        Spacer()
+                        stepButton("minus", enabled: n > 0) { pick[t] = max(0, n - 1) }
+                        Text("\(n)").font(Theme.data(16, weight: .bold)).foregroundStyle(Theme.paper).frame(minWidth: 30)
+                        stepButton("plus", enabled: n < available && total < Army.maxDivisions) { pick[t] = n + 1 }
+                        stepButton("plus.square.on.square", enabled: n < available && total < Army.maxDivisions) {
+                            pick[t] = min(available, n + min(5, Army.maxDivisions - total))
+                        }
+                    }
+                }
+                HStack {
+                    Text("\(total)/\(Army.maxDivisions) divisions").font(Theme.data(13, weight: .semibold))
+                        .foregroundStyle(total == Army.maxDivisions ? Theme.amber : Theme.steel)
                     Spacer()
-                    stepButton("minus", enabled: n > 0) { pick[t] = max(0, n - 1) }
-                    Text("\(n)").font(Theme.data(16, weight: .bold)).foregroundStyle(Theme.paper).frame(minWidth: 30)
-                    stepButton("plus", enabled: n < available && total < Army.maxDivisions) { pick[t] = n + 1 }
-                    stepButton("plus.square.on.square", enabled: n < available && total < Army.maxDivisions) {
-                        pick[t] = min(available, n + min(5, Army.maxDivisions - total))
+                    QuietButton(title: "Remplir", icon: "wand.and.stars") {
+                        var left = Army.maxDivisions
+                        var p: [DivisionType: Int] = [:]
+                        for t in DivisionType.allCases {
+                            let n = min(left, reserve[t] ?? 0)
+                            p[t] = n
+                            left -= n
+                        }
+                        pick = p
                     }
                 }
-            }
-            if !bases.isEmpty {
-                Picker("Rassemblement", selection: $base) {
-                    Text(sim.isAtWar(country.id) ? "Au front" : "Base principale").tag(-1)
-                    ForEach(bases, id: \.self) { b in Text("Base de \(ProvinceMap.all[b].name)").tag(b) }
+                ActionButton(title: "Former l'armée à \(chosen >= 0 ? ProvinceMap.all[chosen].name : "la base")", icon: "plus",
+                             enabled: total > 0 && chosen >= 0) {
+                    let composition = pick
+                    let b = chosen
+                    store.perform { s, _ in s.formArmy(at: b, composition: composition) }
+                    pick = [:]
                 }
-                .tint(Theme.amber)
-            }
-            HStack {
-                Text("\(total)/\(Army.maxDivisions) divisions").font(Theme.data(13, weight: .semibold))
-                    .foregroundStyle(total == Army.maxDivisions ? Theme.amber : Theme.steel)
-                Spacer()
-                QuietButton(title: "Tout auto", icon: "wand.and.stars") {
-                    var left = Army.maxDivisions
-                    var p: [DivisionType: Int] = [:]
-                    for t in DivisionType.allCases {
-                        let n = min(left, reserve[t] ?? 0)
-                        p[t] = n
-                        left -= n
-                    }
-                    pick = p
-                }
-            }
-            ActionButton(title: "Former l'armée", icon: "plus", enabled: total > 0) {
-                let id = country.id
-                let composition = pick
-                let place: Int? = base >= 0 ? base : nil
-                store.perform { s, _ in s.createArmy(for: id, composition: composition, at: place) }
-                pick = [:]
             }
         }
     }
@@ -354,7 +389,7 @@ struct ArmyBuilderCard: View {
                 .frame(width: 38, height: 38)
                 .background(Color.white.opacity(enabled ? 0.09 : 0.03), in: RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Pressable())
         .disabled(!enabled)
     }
 }

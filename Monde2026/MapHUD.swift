@@ -154,6 +154,8 @@ struct MapLegend: View {
         case .military:
             item(Theme.coral, "En guerre")
             gradient([Theme.steel, Theme.amber], "Faible", "Puissante")
+        case .trade, .conflicts, .allies, .industry:
+            EmptyView()
         case .terrain:
             ForEach(Terrain.allCases, id: \.self) { t in
                 let c = t.rgb

@@ -89,6 +89,7 @@ struct StructureMarker: Equatable {
     let fort: Int
     let base: Bool
     let building: Bool
+    var industry: Int = 0
 }
 
 /// Trajet d'une armée (points MapKit).
@@ -128,6 +129,7 @@ struct MapSnapshot: Equatable {
     var routes: [ArmyRoute] = []
     var battles: [BattleMarker] = []
     var structures: [StructureMarker] = []
+    var highlight: Set<Int> = []        // régions où l'on peut construire
 
     static let empty = MapSnapshot(fills: [], borders: [], labels: [], plans: [], selectedProvince: nil)
 }
@@ -135,7 +137,7 @@ struct MapSnapshot: Equatable {
 enum MapSnapshotBuilder {
 
     static func build(_ sim: Simulation, mode: MapMode, selected: CountryID?, selectedProvince: Int?,
-                      selectedArmy: Int? = nil, group: Set<Int> = []) -> MapSnapshot {
+                      selectedArmy: Int? = nil, group: Set<Int> = [], highlight: Set<Int> = []) -> MapSnapshot {
         let provinces = ProvinceMap.all
         guard !provinces.isEmpty else { return .empty }
         let owners = sim.provinceOwners()
@@ -170,6 +172,12 @@ enum MapSnapshotBuilder {
             case .core where mode == .terrain, .annexed where mode == .terrain:
                 let t = TerrainMap.terrain(p.id).rgb
                 fills.append(ProvinceFill(color: RGBA(UIColor(red: t.0, green: t.1, blue: t.2, alpha: 1)), stripes: nil))
+            case .core where mode == .industry, .annexed where mode == .industry, .occupied where mode == .industry:
+                let n = Double(sim.complexCount(at: p.id))
+                let base = color(info.owner ?? p.country).darker(0.55)
+                let lit = UIColor(red: 0.42, green: 0.80, blue: 0.95, alpha: 1)
+                fills.append(ProvinceFill(color: RGBA(n == 0 ? base : UIColor(Theme.blend(Color(uiColor: base), Color(uiColor: lit), min(1, 0.25 + n / 6)))),
+                                          stripes: nil))
             case .core, .annexed:
                 var base = color(info.owner ?? p.country)
                 if let s = selected, info.owner == s {
@@ -326,10 +334,12 @@ enum MapSnapshotBuilder {
         }
         var structures: [StructureMarker] = []
         let building = Set(sim.state.constructions.map { $0.province })
-        for p in Set(sim.state.forts.keys).union(sim.state.bases).union(building).sorted() {
+        let industrial = Set(sim.state.complexes.keys.filter { sim.complexCount(at: $0) > 0 })
+        for p in Set(sim.state.forts.keys).union(sim.state.bases).union(building).union(industrial).sorted() {
             let lp = provinces[p].labelPoint
+            let isFortJob = sim.construction(at: p).map { $0.kind == .fort } ?? false
             structures.append(StructureMarker(x: lp.x, y: lp.y, fort: sim.fortLevel(p), base: sim.state.bases.contains(p),
-                                              building: building.contains(p)))
+                                              building: isFortJob, industry: sim.complexCount(at: p)))
         }
         var snap = MapSnapshot(fills: fills, borders: borders, labels: labels, plans: plans,
                                selectedProvince: selectedProvince)
@@ -337,6 +347,7 @@ enum MapSnapshotBuilder {
         snap.routes = routes
         snap.battles = battleMarkers
         snap.structures = structures
+        snap.highlight = highlight
         return snap
     }
 
@@ -360,8 +371,34 @@ enum MapSnapshotBuilder {
         case .military:
             if sim.isAtWar(id) { return UIColor(Theme.coral) }
             return UIColor(Theme.blend(Theme.steel, Theme.amber, min(1, sim.militaryPower(id) / 6000)))
-        case .terrain:
+        case .terrain, .industry:
             return Theme.politicalColor(id)
+        case .trade:
+            guard let p = player else { return Theme.neutralLand }
+            if id == p { return UIColor(Theme.amber) }
+            if sim.enemies(of: p).contains(id) { return UIColor(Theme.coral).darker(0.35) }
+            if sim.hasTreaty(.sanctions, p, id) || sim.hasTreaty(.sanctions, id, p) { return UIColor(Theme.coral) }
+            if sim.hasTreaty(.tradePact, p, id) { return UIColor(Theme.teal) }
+            let r = sim.relation(p, id)
+            return UIColor(Theme.blend(Theme.steel.opacity(0.6), Theme.sky, max(0, r) / 100)).darker(0.25)
+        case .conflicts:
+            guard sim.isAtWar(id) else { return Theme.neutralLand.darker(0.35) }
+            if let p = player {
+                if id == p || sim.allies(of: p).contains(id) && !sim.enemies(of: id).isDisjoint(with: sim.enemies(of: p)) {
+                    return UIColor(Theme.teal)
+                }
+                if sim.enemies(of: p).contains(id) { return UIColor(Theme.coral) }
+            }
+            return UIColor(red: 0.93, green: 0.55, blue: 0.22, alpha: 1)
+        case .allies:
+            guard let p = player else { return Theme.neutralLand }
+            if id == p { return UIColor(Theme.amber) }
+            if sim.enemies(of: p).contains(id) { return UIColor(Theme.coral) }
+            if sim.hasTreaty(.alliance, p, id) { return UIColor(Theme.teal) }
+            if let mine = sim.faction(of: p), sim.faction(of: id)?.id == mine.id { return UIColor(Theme.teal).lighter(0.25) }
+            if sim.hasTreaty(.guarantee, p, id) || sim.hasTreaty(.guarantee, id, p) { return UIColor(Theme.sky) }
+            if sim.hasTreaty(.nonAggression, p, id) { return UIColor(Theme.steel) }
+            return Theme.neutralLand.darker(0.3)
         }
     }
 }
@@ -537,6 +574,21 @@ final class ProvinceRenderer: MKOverlayRenderer {
         // Passe 4 : lignes de front (halo + trait).
         stroke(kinds, .front, color: UIColor(Theme.coral).withAlphaComponent(0.35), width: 7 * px, area: area, context: context)
         stroke(kinds, .front, color: UIColor(Theme.coral), width: 2.6 * px, area: area, context: context)
+
+        // 2b. Régions où l'on peut construire (mode placement)
+        if !snap.highlight.isEmpty {
+            for id in snap.highlight where id < provinces.count && provinces[id].bounds.intersects(area) {
+                context.addPath(provinces[id].path)
+            }
+            context.setFillColor(UIColor(Theme.amber).withAlphaComponent(0.22).cgColor)
+            context.fillPath()
+            for id in snap.highlight where id < provinces.count && provinces[id].bounds.intersects(area) {
+                context.addPath(provinces[id].path)
+            }
+            context.setStrokeColor(UIColor(Theme.amber).cgColor)
+            context.setLineWidth(1.8 * px)
+            context.strokePath()
+        }
 
         // 3. Région sélectionnée
         if let sel = snap.selectedProvince, sel < provinces.count, provinces[sel].bounds.intersects(area) {
@@ -806,6 +858,35 @@ final class ProvinceRenderer: MKOverlayRenderer {
             context.scaleBy(x: px, y: px)
             text.draw(at: CGPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attrs)
             context.restoreGState()
+            x += 21 * px
+        }
+        if st.industry > 0 {
+            let r = CGRect(x: x - 9 * px, y: c.y - 9 * px, width: 18 * px, height: 18 * px)
+            context.setFillColor(UIColor(red: 0.42, green: 0.66, blue: 0.95, alpha: 1).cgColor)
+            context.fill(r)
+            // Toit en dents de scie
+            context.setFillColor(UIColor(red: 0.05, green: 0.08, blue: 0.12, alpha: 1).cgColor)
+            context.move(to: CGPoint(x: r.minX + 2 * px, y: r.maxY - 3 * px))
+            context.addLine(to: CGPoint(x: r.minX + 2 * px, y: r.minY + 9 * px))
+            context.addLine(to: CGPoint(x: r.minX + 7 * px, y: r.minY + 5 * px))
+            context.addLine(to: CGPoint(x: r.minX + 7 * px, y: r.minY + 9 * px))
+            context.addLine(to: CGPoint(x: r.minX + 12 * px, y: r.minY + 5 * px))
+            context.addLine(to: CGPoint(x: r.minX + 12 * px, y: r.minY + 9 * px))
+            context.addLine(to: CGPoint(x: r.maxX - 2 * px, y: r.minY + 5 * px))
+            context.addLine(to: CGPoint(x: r.maxX - 2 * px, y: r.maxY - 3 * px))
+            context.closePath()
+            context.fillPath()
+            if st.industry > 1 {
+                let text = "\(st.industry)" as NSString
+                let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 8, weight: .heavy),
+                                                            .foregroundColor: UIColor.white]
+                let size = text.size(withAttributes: attrs)
+                context.saveGState()
+                context.translateBy(x: r.midX, y: r.maxY - 6 * px)
+                context.scaleBy(x: px, y: px)
+                text.draw(at: CGPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attrs)
+                context.restoreGState()
+            }
             x += 21 * px
         }
         if st.base {

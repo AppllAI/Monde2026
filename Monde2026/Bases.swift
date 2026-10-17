@@ -11,11 +11,40 @@ import Foundation
 //  Et l'entraînement des armées (expérience 0…100 %).
 // =============================================================
 
-enum BuildingKind: String, Codable {
+enum BuildingKind: String, Codable, CaseIterable, Identifiable {
     case fort, base
+    // Complexes industriels (voir Industry.swift)
+    case consumerPlant, techPlant, armsPlant, shipyard, spaceCenter
 
-    var name: String { self == .fort ? "Fort" : "Base militaire" }
-    var icon: String { self == .fort ? "building.columns.fill" : "star.square.fill" }
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .fort: return "Fort"
+        case .base: return "Base militaire"
+        case .consumerPlant: return "Usine de biens"
+        case .techPlant: return "Usine haute technologie"
+        case .armsPlant: return "Usine d'armement"
+        case .shipyard: return "Chantier naval"
+        case .spaceCenter: return "Centre spatial"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .fort: return "building.columns.fill"
+        case .base: return "star.square.fill"
+        case .consumerPlant: return "building.2.fill"
+        case .techPlant: return "cpu.fill"
+        case .armsPlant: return "shield.checkered"
+        case .shipyard: return "ferry.fill"
+        case .spaceCenter: return "airplane.departure"
+        }
+    }
+
+    var isIndustry: Bool { self != .fort && self != .base }
+
+    static var industries: [BuildingKind] { [.consumerPlant, .techPlant, .armsPlant, .shipyard, .spaceCenter] }
 }
 
 struct ConstructionJob: Codable, Identifiable {
@@ -56,6 +85,8 @@ extension Simulation {
             return (0.8 * Double(next), Int(Double(40 + 15 * next) * (1.3 - 0.5 * infra)))
         case .base:
             return (3, Int(90 * (1.3 - 0.5 * infra)))
+        default:
+            return industryCost(kind, for: id)
         }
     }
 
@@ -64,6 +95,8 @@ extension Simulation {
         guard controller(of: province) == id else { return "Il faut tenir cette région." }
         if construction(at: province) != nil { return "Un chantier est déjà en cours ici." }
         switch kind {
+        case .consumerPlant, .techPlant, .armsPlant, .shipyard, .spaceCenter:
+            if let reason = industryBlocked(kind, at: province, for: id) { return reason }
         case .fort:
             if fortLevel(province) >= Simulation.maxFortLevel { return "Fort déjà au niveau maximum." }
         case .base:
@@ -83,7 +116,7 @@ extension Simulation {
         state.constructions.append(ConstructionJob(id: state.nextConstructionID, province: province, kind: kind,
                                                    owner: id, daysLeft: days, totalDays: days))
         state.nextConstructionID += 1
-        let what = kind == .fort ? "Fort niveau \(fortLevel(province) + 1)" : "Base militaire"
+        let what = kind == .fort ? "Fort niveau \(fortLevel(province) + 1)" : kind.name
         return ActionResult(success: true, message: "\(what) en chantier à \(ProvinceMap.all[province].name) : \(days) jours, \(Fmt.money(cost)).")
     }
 
@@ -104,9 +137,10 @@ extension Simulation {
             switch job.kind {
             case .fort: state.forts[job.province] = min(Simulation.maxFortLevel, fortLevel(job.province) + 1)
             case .base: state.bases.insert(job.province)
+            default: completeIndustry(job.kind, at: job.province, for: job.owner)
             }
             if job.owner == state.playerID {
-                let what = job.kind == .fort ? "Fort niveau \(fortLevel(job.province))" : "Base militaire"
+                let what = job.kind == .fort ? "Fort niveau \(fortLevel(job.province))" : job.kind.name
                 addEvent("🏗️ \(what) terminé à \(ProvinceMap.all[job.province].name).", important: true)
             }
         }

@@ -223,7 +223,7 @@ extension Simulation {
             total += Double(n) * (s.softAttack * (1 - h) + s.hardAttack * h + s.breakthrough * 0.5) * armor
         }
         return (total * c.combatMultiplier + droneSupport(c, armyCount: a.count)) * c.posture.attack * (0.3 + 0.7 * a.organization)
-            * (0.8 + 0.4 * a.experience)
+            * (0.8 + 0.4 * a.experience) * (state.industryCache[a.owner]?.arms ?? 1)
     }
 
     func armyDefense(_ a: Army, vsHardness h: Double) -> Double {
@@ -236,7 +236,7 @@ extension Simulation {
         // Retranchement progressif : jusqu'à +50 % après un mois sur place.
         let entrenched = 1 + min(0.5, Double(a.daysInPlace) / 60)
         return (total * c.combatMultiplier + droneSupport(c, armyCount: a.count)) * c.posture.defense
-            * (0.3 + 0.7 * a.organization) * entrenched * (0.8 + 0.4 * a.experience)
+            * (0.3 + 0.7 * a.organization) * entrenched * (0.8 + 0.4 * a.experience) * (state.industryCache[a.owner]?.arms ?? 1)
     }
 
     /// Appui des drones : rendements décroissants (des milliers de drones ne remplacent pas une armée).
@@ -284,8 +284,8 @@ extension Simulation {
         guard let a = state.countries[attacker], let d = state.countries[defender] else { return 0.5 }
         let enemiesA = Double(max(1, enemies(of: attacker).count))
         let enemiesD = Double(max(1, enemies(of: defender).count))
-        let pa = (a.airPower + a.stock(.missile) * 0.4 * a.tech) / enemiesA
-        let pd = (d.airPower + d.stock(.missile) * 0.4 * d.tech) / enemiesD
+        let pa = (a.airPower + a.stock(.missile) * 0.4 * a.tech) / enemiesA * (1 + (state.industryCache[attacker]?.space ?? 0))
+        let pd = (d.airPower + d.stock(.missile) * 0.4 * d.tech) / enemiesD * (1 + (state.industryCache[defender]?.space ?? 0))
         return pa + pd > 0 ? pa / (pa + pd) : 0.5
     }
 
@@ -558,6 +558,13 @@ extension Simulation {
     }
 
     mutating func dissolveArmy(_ armyID: Int) {
+        // Les divisions du joueur rentrent dans la base la plus proche.
+        if let a = state.armies.first(where: { $0.id == armyID }), a.owner == state.playerID {
+            let own = bases(of: a.owner)
+            if let b = own.min(by: { distanceKm(a.province, $0) < distanceKm(a.province, $1) }) {
+                for (t, n) in a.divisions { state.depots[b, default: [:]][t, default: 0] += n }
+            }
+        }
         state.armies.removeAll { $0.id == armyID }
     }
 

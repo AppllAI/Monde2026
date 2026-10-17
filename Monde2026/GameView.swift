@@ -10,10 +10,14 @@ struct GameView: View {
     @ObservedObject var store: GameStore
     @AppStorage("tutorialSeen") private var tutorialSeen = false
 
+    @State private var wideLayout = true
+
+    private let spring = Animation.spring(response: 0.38, dampingFraction: 0.86)
+
     var body: some View {
         GeometryReader { geo in
             let wide = geo.size.width > 700
-            ZStack {
+            ZStack(alignment: .trailing) {
                 WorldMapView(snapshot: store.mapSnapshot, satellite: store.satellite, focus: store.focus) { tap in
                     store.handleTap(tap)
                 }
@@ -22,7 +26,7 @@ struct GameView: View {
                 VStack(spacing: 10) {
                     TopBar(store: store, wide: wide)
                     HStack(alignment: .top, spacing: 10) {
-                        if wide && store.selectedCountry != nil && store.selectedArmy == nil {
+                        if wide && store.selectedCountry != nil && store.selectedArmy == nil && store.placing == nil {
                             CountrySidebar(store: store)
                                 .frame(width: 350)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -30,11 +34,17 @@ struct GameView: View {
                         }
                         Spacer(minLength: 0)
                         VStack(alignment: .trailing, spacing: 10) {
+                            if store.mapTray {
+                                MapTray(store: store)
+                                    .transition(.asymmetric(insertion: .scale(scale: 0.9, anchor: .topTrailing).combined(with: .opacity),
+                                                            removal: .opacity))
+                            }
                             NoticeStack(store: store)
                                 .frame(maxWidth: wide ? 360 : .infinity)
                             MapControls(store: store)
                         }
                     }
+                    PlacementBanner(store: store)
                     Spacer(minLength: 0)
                     if store.selectedArmy != nil {
                         ArmyCard(store: store)
@@ -44,15 +54,8 @@ struct GameView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    HStack(alignment: .bottom) {
-                        MapLegend(mode: store.mapMode)
-                        Spacer()
-                    }
-                    .frame(maxWidth: 640)
                     SectionDock(store: store)
                 }
-                .animation(.snappy, value: store.selectedCountry)
-                .animation(.snappy, value: store.selectedArmy)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 if store.selectedArmy != nil {
@@ -63,18 +66,75 @@ struct GameView: View {
                     }
                     .transition(.opacity)
                 }
+                // Sur iPad : les panneaux glissent depuis la droite, la carte reste visible et vivante.
+                if wide, let panel = store.panel, !panel.isModal {
+                    Color.black.opacity(0.18).ignoresSafeArea()
+                        .onTapGesture { withAnimation(spring) { store.panel = nil } }
+                        .transition(.opacity)
+                    PanelDrawer(store: store, panel: panel)
+                        .frame(width: min(540, geo.size.width * 0.5))
+                        .transition(.move(edge: .trailing))
+                        .id(GameSection.of(panel).map { "\($0)" } ?? panel.id)
+                }
                 if !tutorialSeen {
                     TutorialOverlay { tutorialSeen = true }
                 }
             }
+            .animation(spring, value: store.selectedCountry)
+            .animation(spring, value: store.selectedArmy)
+            .animation(spring, value: store.panel)
+            .animation(spring, value: store.placing)
+            .animation(spring, value: store.mapTray)
+            .onAppear { wideLayout = wide }
+            .onChange(of: wide) { _, w in wideLayout = w }
         }
-        .sheet(item: $store.panel, onDismiss: { store.presentUrgent() }) { panel in
+        .sheet(item: sheetBinding, onDismiss: { store.presentUrgent() }) { panel in
             PanelHost(store: store, panel: panel)
                 .presentationDetents(panel.isLive ? [.medium, .large] : [.large, .medium])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Theme.ink.opacity(0.96))
                 .presentationCornerRadius(28)
         }
+    }
+
+    /// Sur iPad, seuls les panneaux « décision » (événement, fin de partie) s'ouvrent en feuille.
+    private var sheetBinding: Binding<Panel?> {
+        Binding(get: {
+            guard let p = store.panel else { return nil }
+            return (wideLayout && !p.isModal) ? nil : p
+        }, set: { value in
+            if value == nil, let p = store.panel, !(wideLayout && !p.isModal) { store.panel = nil }
+        })
+    }
+}
+
+/// Panneau latéral (iPad) : glisse depuis la droite, se ferme d'un geste vers la droite.
+struct PanelDrawer: View {
+    @ObservedObject var store: GameStore
+    let panel: Panel
+    @State private var drag: CGFloat = 0
+
+    var body: some View {
+        PanelHost(store: store, panel: panel)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .background(Theme.ink.opacity(0.97))
+            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 26, bottomLeadingRadius: 26, style: .continuous))
+            .overlay(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.25)).frame(width: 5, height: 46).padding(.leading, 6)
+            }
+            .shadow(color: .black.opacity(0.45), radius: 24, x: -6)
+            .ignoresSafeArea(edges: .vertical)
+            .offset(x: max(0, drag))
+            .gesture(
+                DragGesture(minimumDistance: 20)
+                    .onChanged { v in if abs(v.translation.width) > abs(v.translation.height) { drag = v.translation.width } }
+                    .onEnded { v in
+                        if v.translation.width > 120 {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) { store.panel = nil }
+                        }
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { drag = 0 }
+                    }
+            )
     }
 }
 
@@ -314,6 +374,7 @@ struct PanelHost: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 SectionTabs(store: store, panel: panel)
+                Group {
                 switch panel {
                 case .economy: EconomyPanel(store: store)
                 case .military: MilitaryPanel(store: store)
@@ -327,7 +388,11 @@ struct PanelHost: View {
                 case .event(let eventID): EventPanel(store: store, eventID: eventID)
                 case .endGame: EndGamePanel(store: store)
                 case .battle(let province): BattlePanel(store: store, province: province)
+                case .army(let id): ArmyOrganizer(store: store, armyID: id)
                 }
+                }
+                .id(panel)
+                .transition(.opacity.combined(with: .offset(y: 8)))
                 if let message = store.feedback {
                     Text(message).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink)
                         .padding(12).frame(maxWidth: .infinity)

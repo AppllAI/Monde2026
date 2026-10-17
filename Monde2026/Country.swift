@@ -35,6 +35,8 @@ struct TrainingBatch: Codable {
     var type: DivisionType
     var count: Int
     var daysLeft: Int
+    var base: Int? = nil         // base où les recrues apparaîtront (joueur)
+    var totalDays: Int? = nil
 }
 
 /// Photo mensuelle pour les graphiques.
@@ -396,7 +398,8 @@ struct Country: Codable, Identifiable {
 
     mutating func startTraining(_ type: DivisionType, count: Int, days: Int? = nil) {
         guard count > 0 else { return }
-        training.append(TrainingBatch(type: type, count: count, daysLeft: days ?? type.trainingDays))
+        let d = days ?? type.trainingDays
+        training.append(TrainingBatch(type: type, count: count, daysLeft: d, base: nil, totalDays: d))
     }
 
     mutating func complete(_ kind: ConstructionKind) {

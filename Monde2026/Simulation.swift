@@ -67,6 +67,9 @@ struct GameState: Codable {
     var constructions: [ConstructionJob] = []
     var nextConstructionID = 1
     var pauseRequested = false             // l'interface doit mettre en pause (guerre qui nous concerne)
+    var complexes: [Int: [BuildingKind: Int]] = [:]    // région -> complexes industriels
+    var industryCache: [CountryID: IndustryBonus] = [:]
+    var depots: [Int: [DivisionType: Int]] = [:]        // divisions du joueur en réserve, par base
 }
 
 struct Simulation {
@@ -125,6 +128,8 @@ struct Simulation {
         setupWorldRelations()
         initializeControl()
         setupBases()
+        setupIndustry()
+        refreshIndustryBonuses()
         deployInitialArmies()
         if let p = playerID { formStartingArmies(p) }
         state.initialWorldGDP = countryIDs.reduce(0.0) { $0 + effectiveGDP($1) }
@@ -155,6 +160,7 @@ struct Simulation {
         dailyArmies()
         dailyTraining()
         dailyConstruction()
+        syncDepots()
         dailyWar()
         scheduledNews()
         if Simulation.calendar.component(.day, from: currentDate) == 1 {
@@ -191,6 +197,8 @@ struct Simulation {
         }
         monthlyEvents()
         aiFortify()
+        aiIndustry()
+        refreshIndustryBonuses()
         aiNuclearDecisions()
         monthlyGoals()
         monthlyAchievements()
@@ -344,12 +352,14 @@ struct Simulation {
 
     /// Lève et entraîne de nouvelles divisions. Retourne false si la main-d'œuvre manque.
     @discardableResult
-    mutating func recruit(_ type: DivisionType, count: Int, for id: CountryID) -> Bool {
+    mutating func recruit(_ type: DivisionType, count: Int, for id: CountryID, base: Int? = nil) -> Bool {
         guard count > 0, var c = state.countries[id] else { return false }
         let men = Double(count) * type.stats.manpower
         guard men <= c.availableManpower else { return false }
         c.activePersonnel += men
-        c.startTraining(type, count: count)
+        let days = Int(Double(type.trainingDays) * (state.industryCache[id]?.training ?? 1))
+        c.startTraining(type, count: count, days: max(10, days))
+        if let b = base { c.training[c.training.count - 1].base = b }
         state.countries[id] = c
         return true
     }
