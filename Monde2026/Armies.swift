@@ -513,7 +513,7 @@ extension Simulation {
                                  divisions: half, path: [], progress: 0, organization: a.organization,
                                  daysInPlace: a.daysInPlace, engaged: false, amphibious: false,
                                  general: newGeneral, stance: a.stance,
-                                 supply: a.supply, experience: a.experience, training: a.training))
+                                 experience: a.experience, training: a.training, supply: a.supply))
         state.nextArmyID += 1
         return ActionResult(success: true, message: "Armée divisée en deux.")
     }
