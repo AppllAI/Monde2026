@@ -665,6 +665,7 @@ extension Simulation {
         }
         for i in state.armies.indices {
             state.armies[i].daysInPlace = 90
+            state.armies[i].planning = 0.5
         }
     }
 
@@ -701,9 +702,9 @@ extension Simulation {
         let front = frontierProvinces(id, enemies: foes)
         let threshold: Double
         switch c.posture {
-        case .offensive: threshold = 1.3
-        case .balanced: threshold = 1.6
-        case .defensive: threshold = 3
+        case .offensive: threshold = 1.05
+        case .balanced: threshold = 1.25
+        case .defensive: threshold = 1.9
         }
         var frontierCache: [CountryID: (Set<Int>, Int)] = [:]
         let mine = state.armies.indices.filter { state.armies[$0].owner == id && state.armies[$0].path.isEmpty }
@@ -769,7 +770,7 @@ extension Simulation {
                 if ratio > (best?.1 ?? 0) { best = (n, ratio) }
             }
             // On attend que l'offensive soit préparée, sauf si l'avantage est écrasant.
-            if let (target, ratio) = best, ratio >= threshold, a.planning >= 0.5 || ratio >= threshold * 1.4 {
+            if let (target, ratio) = best, ratio >= threshold, a.planning >= 0.4 || ratio >= threshold * 1.3 {
                 let stance: ArmyStance = ratio >= threshold * 1.5 ? .assault : .balanced
                 for j in mine where state.armies[j].path.isEmpty && state.armies[j].organization > 0.6
                     && ProvinceMap.all[state.armies[j].province].neighbors.contains(target) {
