@@ -237,11 +237,12 @@ enum UnitArt {
             let helmet = UIBezierPath()
             helmet.move(to: p(0.16, 0.66))
             helmet.addCurve(to: p(0.70, 0.66), controlPoint1: p(0.16, 0.06), controlPoint2: p(0.70, 0.06))
-            helmet.addLine(to: p(0.80, 0.70)); helmet.addLine(to: p(0.06, 0.70)); helmet.close()
+            helmet.addLine(to: p(0.86, 0.70)); helmet.addLine(to: p(0.00, 0.70)); helmet.close()
             ctx.addPath(helmet.cgPath); ctx.fillPath()
             ctx.fill(CGRect(origin: p(0.04, 0.70), size: CGSize(width: w * 0.80, height: h * 0.10)))
-            ctx.setLineWidth(h * 0.08)
-            ctx.move(to: p(0.86, 0.92)); ctx.addLine(to: p(0.94, 0.20)); ctx.strokePath()
+            // Lunettes (bande sur le casque) pour bien le reconnaître.
+            ctx.setFillColor(UIColor.black.withAlphaComponent(0.45).cgColor)
+            ctx.fill(CGRect(origin: p(0.22, 0.44), size: CGSize(width: w * 0.42, height: h * 0.08)))
         case .airborne:
             // Parachute.
             let canopy = UIBezierPath()
