@@ -411,7 +411,8 @@ extension Simulation {
         var stillLent: [FactoryLease] = []
         for lease in state.leases {
             if state.day >= lease.untilDay {
-                state.countries[lease.to]?.militaryFactories = max(0, (state.countries[lease.to]?.militaryFactories ?? 0) - lease.factories)
+                let theirs = state.countries[lease.to]?.militaryFactories ?? 0
+                state.countries[lease.to]?.militaryFactories = max(0, theirs - lease.factories)
                 state.countries[p]?.militaryFactories += lease.factories
                 addEvent("🏭 Nos \(Int(lease.factories)) usines prêtées à \(name(lease.to)) nous reviennent.", important: false)
             } else {
