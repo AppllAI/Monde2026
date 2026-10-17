@@ -62,6 +62,11 @@ struct GameState: Codable {
     var provinceOrg: [Int: Double]         // organisation des garnisons après un combat
     var autoArmies: Bool                   // le joueur laisse l'IA commander ses armées
     var battles: [Int: Battle] = [:]       // batailles en cours, par région disputée
+    var forts: [Int: Int] = [:]            // région -> niveau du fort (1…5)
+    var bases: Set<Int> = []               // régions avec une base militaire
+    var constructions: [ConstructionJob] = []
+    var nextConstructionID = 1
+    var pauseRequested = false             // l'interface doit mettre en pause (guerre qui nous concerne)
 }
 
 struct Simulation {
@@ -119,7 +124,9 @@ struct Simulation {
         setupTechnologies()
         setupWorldRelations()
         initializeControl()
+        setupBases()
         deployInitialArmies()
+        if let p = playerID { formStartingArmies(p) }
         state.initialWorldGDP = countryIDs.reduce(0.0) { $0 + effectiveGDP($1) }
         for id in countryIDs {
             let atWar = isAtWar(id)
@@ -146,6 +153,8 @@ struct Simulation {
         state.day += 1
         dailyMilitary()
         dailyArmies()
+        dailyTraining()
+        dailyConstruction()
         dailyWar()
         scheduledNews()
         if Simulation.calendar.component(.day, from: currentDate) == 1 {
@@ -181,6 +190,7 @@ struct Simulation {
             recordSnapshot(id)
         }
         monthlyEvents()
+        aiFortify()
         aiNuclearDecisions()
         monthlyGoals()
         monthlyAchievements()
@@ -243,7 +253,7 @@ struct Simulation {
             }
             // Nouvelles divisions si les existantes sont bien équipées et que notre camp ne domine pas déjà.
             if c.availableManpower > 24 && c.divisionFill > 0.75 && sideRatio < 1.5 {
-                let count = min(10, Int(c.availableManpower * 0.15 / DivisionType.infantry.stats.manpower))
+                let count = min(20, Int(c.availableManpower * 0.15 / DivisionType.infantry.stats.manpower))
                 if count > 0 {
                     c.activePersonnel += Double(count) * DivisionType.infantry.stats.manpower
                     c.startTraining(.infantry, count: count)

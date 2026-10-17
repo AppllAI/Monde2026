@@ -473,6 +473,9 @@ extension Simulation {
         }
         let suffix = justified ? "" : " sans motif légitime"
         addEvent("⚔️ \(a.name) déclare la guerre à \(d.name)\(suffix).", important: true)
+        if let p = state.playerID, attacker == p || defender == p || allies(of: p).contains(defender) {
+            state.pauseRequested = true
+        }
 
         // Les alliés et garants du défenseur décident d'entrer en guerre.
         for (ally, probability) in defensiveSupporters(of: defender, against: attacker) {

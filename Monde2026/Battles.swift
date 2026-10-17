@@ -230,6 +230,10 @@ struct Battle: Codable, Identifiable {
     var lastDay: Int
     var airStrikeUntil: Int
     var airStrikeSide: CountryID?
+    var fronts: [Int] = []          // régions d'où partent les attaques (flèches sur la carte)
+
+    /// Avancée de l'attaquant vers la prise de la région (0 → 100 %).
+    var captureProgress: Double { (1 - (defenderOrg - 0.2) / 0.8).clamped(0, 1) }
 
     /// Part de l'avantage de l'attaquant (0…1).
     var balance: Double { attack + defense > 0 ? attack / (attack + defense) : 0.5 }
@@ -360,6 +364,7 @@ extension Simulation {
             let holder = controller(of: cur)
             let p = ProvinceMap.all[cur]
             // Une région « chez soi » (ou chez un allié) ravitaille.
+            if holder == owner && state.bases.contains(cur) { return Double(d) <= range / 2 ? 1 : max(0.5, 1 - (Double(d) - range / 2) * 0.08) }
             if holder == p.country && (holder == owner || friendly(holder)) && state.countries[holder] != nil {
                 let half = range / 2
                 let base = holder == owner ? 1.0 : 0.9
@@ -385,8 +390,15 @@ extension Simulation {
 
     mutating func updateSupply() {
         var cache: [String: Double] = [:]
+        var warCache: [CountryID: Bool] = [:]
         for i in state.armies.indices {
             let a = state.armies[i]
+            let atWar = warCache[a.owner] ?? isAtWar(a.owner)
+            warCache[a.owner] = atWar
+            guard atWar else {
+                state.armies[i].supply = 1
+                continue
+            }
             let key = "\(a.owner)-\(a.province)-\(a.general.trait == .logistician)"
             if let v = cache[key] {
                 state.armies[i].supply = v
@@ -523,6 +535,15 @@ extension Simulation {
         battle.attackerGeneral = attLead.name
         battle.defenderGeneral = defArmies.isEmpty ? "Garnison" : defLead.name
         battle.lastDay = today
+        battle.fronts = Array(Set(attArmies.map { $0.province })).sorted()
+        if battle.startDay == today, let p = state.playerID {
+            let place = ProvinceMap.all[target].name
+            if defenderCountry == p {
+                addEvent("⚔️ \(name(leadOwner)) attaque \(place) avec \(Int(attArmies.reduce(0) { $0 + $1.count })) divisions.", important: true)
+            } else if attArmies.contains(where: { $0.owner == p }) {
+                addEvent("⚔️ Nos troupes passent à l'attaque sur \(place).", important: false)
+            }
+        }
 
         // Nouvelle phase tactique tous les 4 jours
         if today - battle.phaseStart >= 4 {
@@ -560,7 +581,7 @@ extension Simulation {
         let attHardness = attArmies.reduce(0.0) { $0 + $1.hardness } / Double(attArmies.count)
 
         var attack = 0.0
-        var amphibiousWeight = 0.0, riverWeight = 0.0, supplySum = 0.0, planSum = 0.0, generalSum = 0.0, stanceSum = 0.0
+        var amphibiousWeight = 0.0, riverWeight = 0.0, supplySum = 0.0, generalSum = 0.0, stanceSum = 0.0
         var terrainSum = 0.0
         for a in attArmies {
             let v = armyAttack(a, vsHardness: defHardness)
@@ -568,8 +589,6 @@ extension Simulation {
             if a.amphibious { amphibiousWeight += v }
             if TerrainMap.river(a.province, target) && !a.amphibious { riverWeight += v }
             supplySum += v * (0.45 + 0.55 * a.supply)
-            let planBonus = a.general.trait == .planner ? 0.32 : 0.25
-            planSum += v * (1 + planBonus * a.planning)
             var g = 1 + 0.025 * Double(a.general.skill)
             if a.general.trait == .offensive { g += 0.1 }
             if a.general.trait == .armor { g += 0.15 * armorShare }
@@ -585,11 +604,8 @@ extension Simulation {
         if amphibiousWeight > 0 { addA("Débarquement", 1 - (0.4 - 0.25 * marineShare) * amphibiousWeight / base) }
         addA("Météo : \(weather.name.lowercased())", weather.attack * (1 + armorShare * (weather.armor - 1)))
         addA("Ravitaillement", supplySum / base)
-        addA("Planification", planSum / base)
         addA("Généraux", generalSum / base)
         addA("Posture", stanceSum / base)
-        let width = combatWidth(target) * terrain.width
-        addA("Largeur de front", min(1, width / attTotal))
         let air = airSuperiority(leadOwner, defenderCountry)
         addA("Maîtrise du ciel", 1 + 0.2 * (air - 0.5))
         if battle.airStrikeSide == leadOwner && today <= battle.airStrikeUntil { addA("Frappes aériennes", 1.15) }
@@ -626,7 +642,6 @@ extension Simulation {
         var armyFactor = 1.0
         if armyDef > 0 {
             armyFactor *= dSupply / armyDef * (dGeneral / armyDef) * (dStance / armyDef)
-            armyFactor *= min(1, width / Double(max(1, defDivisions)))
         }
         var defense = armyDef * armyFactor + garrison
         if armyDef > 0 {
@@ -634,7 +649,9 @@ extension Simulation {
             addD("Armées : ravitaillement, généraux, posture", 1 + (armyFactor - 1) * share)
         }
         if ProvinceMap.all[target].country == defenderCountry { addD("Défendre sa terre", 1.25) }
-        if terrain == .urban { addD("Ville fortifiée", 1.15) }
+        if terrain == .urban { addD("Ville", 1.15) }
+        let fort = fortLevel(target)
+        if fort > 0 { addD("Fort niveau \(fort)", 1 + 0.15 * Double(fort)) }
         addD("Maîtrise du ciel", 1 - 0.2 * (air - 0.5))
         if battle.airStrikeSide == defenderCountry && today <= battle.airStrikeUntil { addD("Frappes aériennes", 1.15) }
         addD("Tactique : \(defTactic.name.lowercased())", tacticValue(defTactic, armies: defArmies, owner: defenderCountry, province: target))
@@ -658,10 +675,10 @@ extension Simulation {
             var loss = attOrgLoss * (a.stance == .assault ? 1.1 : 1)
             if a.general.trait == .offensive { loss *= 0.95 }
             state.armies[i].organization = max(0, a.organization - loss)
-            state.armies[i].planning = max(0, a.planning - 0.07)
+            state.armies[i].experience = min(1, a.experience + 0.002)
             let intensity = 0.004 * onAttackers * a.stance.losses * (attTactic == .assault ? 1.2 : 1)
             applyArmyLosses(i, intensity: intensity)
-            attackerMen += intensity * Double(a.count) * 10
+            attackerMen += intensity * Double(a.count) * 6
             state.armies[i].general.xp += 1
         }
         for j in defenders {
@@ -670,15 +687,16 @@ extension Simulation {
             state.armies[j].daysInPlace += 1
             let intensity = 0.004 * onDefenders * d.stance.losses
             applyArmyLosses(j, intensity: intensity)
-            defenderMen += intensity * Double(d.count) * 10
+            defenderMen += intensity * Double(d.count) * 6
             state.armies[j].general.xp += 1
+            state.armies[j].experience = min(1, d.experience + 0.002)
         }
         state.provinceOrg[target] = max(0, garrisonOrg - defOrgLoss)
         if var d = state.countries[defenderCountry], defenders.isEmpty {
             let share = 1.0 / Double(max(1, controlledCount))
             let f = 0.003 * onDefenders * d.posture.losses
             d.applyLandLosses(fraction: f, share: share)
-            defenderMen += f * Double(d.divisionCount) * 10 * share
+            defenderMen += f * Double(d.divisionCount) * 6 * share
             state.countries[defenderCountry] = d
         }
 

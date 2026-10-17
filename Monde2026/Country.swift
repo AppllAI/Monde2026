@@ -232,7 +232,7 @@ struct Country: Codable, Identifiable {
         reservePersonnel = s.reserve
         casualties = 0
         let landMen = s.active * s.landShare
-        let n = Int(landMen / 12)
+        let n = Int(landMen / 6)
         var remaining = n
         let armored = min(Int(s.tanks / 250), Int(Double(n) * 0.25))
         remaining -= armored

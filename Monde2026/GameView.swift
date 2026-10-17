@@ -11,43 +11,66 @@ struct GameView: View {
     @AppStorage("tutorialSeen") private var tutorialSeen = false
 
     var body: some View {
-        ZStack {
-            WorldMapView(snapshot: store.mapSnapshot, satellite: store.satellite, focus: store.focus) { tap in
-                store.handleTap(tap)
-            }
-            .equatable()
-            .ignoresSafeArea()
-            VStack(spacing: 10) {
-                CommandBar(store: store)
-                ModePicker(store: store)
-                Spacer()
-                NoticeStack(store: store)
+        GeometryReader { geo in
+            let wide = geo.size.width > 700
+            ZStack {
+                WorldMapView(snapshot: store.mapSnapshot, satellite: store.satellite, focus: store.focus) { tap in
+                    store.handleTap(tap)
+                }
+                .equatable()
+                .ignoresSafeArea()
+                VStack(spacing: 10) {
+                    TopBar(store: store, wide: wide)
+                    HStack(alignment: .top, spacing: 10) {
+                        if wide && store.selectedCountry != nil && store.selectedArmy == nil {
+                            CountrySidebar(store: store)
+                                .frame(width: 350)
+                                .frame(maxHeight: geo.size.height * 0.62)
+                                .transition(.move(edge: .leading).combined(with: .opacity))
+                        }
+                        Spacer(minLength: 0)
+                        VStack(alignment: .trailing, spacing: 10) {
+                            NoticeStack(store: store)
+                                .frame(maxWidth: wide ? 360 : .infinity)
+                            MapControls(store: store)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    if store.selectedArmy != nil {
+                        ArmyCard(store: store)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    } else if !wide && store.selectedCountry != nil {
+                        CountrySidebar(store: store)
+                            .frame(maxHeight: geo.size.height * 0.45)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    HStack(alignment: .bottom) {
+                        MapLegend(mode: store.mapMode)
+                        Spacer()
+                    }
+                    .frame(maxWidth: 640)
+                    SectionDock(store: store)
+                }
+                .animation(.snappy, value: store.selectedCountry)
+                .animation(.snappy, value: store.selectedArmy)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 if store.selectedArmy != nil {
-                    ArmyCard(store: store)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else if store.selectedCountry != nil {
-                    InspectorCard(store: store)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    HStack {
+                        WaypointHandle(store: store)
+                            .padding(.leading, 14)
+                        Spacer()
+                    }
+                    .transition(.opacity)
                 }
-                HStack(alignment: .bottom) {
-                    MapLegend(mode: store.mapMode)
-                    Spacer()
-                    MapButtons(store: store)
+                if !tutorialSeen {
+                    TutorialOverlay { tutorialSeen = true }
                 }
-                .frame(maxWidth: 640)
-                Dock(store: store)
-            }
-            .animation(.snappy, value: store.selectedCountry)
-            .animation(.snappy, value: store.selectedArmy)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            if !tutorialSeen {
-                TutorialOverlay { tutorialSeen = true }
             }
         }
         .sheet(item: $store.panel, onDismiss: { store.presentUrgent() }) { panel in
             PanelHost(store: store, panel: panel)
-                .presentationDetents([.medium, .large])
+                .presentationDetents(panel.isLive ? [.medium, .large] : [.large, .medium])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Theme.ink.opacity(0.96))
                 .presentationCornerRadius(28)
@@ -290,6 +313,7 @@ struct PanelHost: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                SectionTabs(store: store, panel: panel)
                 switch panel {
                 case .economy: EconomyPanel(store: store)
                 case .military: MilitaryPanel(store: store)

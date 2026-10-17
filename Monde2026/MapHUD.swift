@@ -107,7 +107,7 @@ struct InspectorCard: View {
 
 struct MapLegend: View {
     let mode: MapMode
-    @State private var expanded = true
+    @State private var expanded = false
 
     var body: some View {
         Button {

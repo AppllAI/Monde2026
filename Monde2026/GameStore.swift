@@ -76,12 +76,14 @@ final class GameStore: ObservableObject {
     @Published var selectedCountry: CountryID?
     @Published var selectedArmy: Int?
     @Published var armyGroup: Set<Int> = []    // armées commandées avec l'armée sélectionnée
+    @Published var waypointMode = false         // chaque région touchée s'ajoute au trajet
+    @Published var waypointLocked = false       // mode étapes verrouillé (sans garder le doigt)
     @Published private(set) var focus: MapFocus?
     private var focusCounter = 0
     @Published var satellite = false
     @Published var toasts: [GameEvent] = []
     @Published var feedback: String?
-    @Published var autoPause = true
+    @Published var autoPause = false
 
     private var lastSeenEventID = 0
     private var loop: Task<Void, Never>?
@@ -152,6 +154,11 @@ final class GameStore: ObservableObject {
             selectedArmy = nil
             armyGroup = []
         }
+        // Le temps ne s'arrête que pour l'essentiel : une guerre qui nous concerne.
+        if sim!.state.pauseRequested {
+            sim!.state.pauseRequested = false
+            speed = 0
+        }
         if !armyGroup.isEmpty {
             let alive = Set(sim!.state.armies.map { $0.id })
             armyGroup = armyGroup.intersection(alive)
@@ -187,12 +194,12 @@ final class GameStore: ObservableObject {
         let fresh = events.filter { $0.id > lastSeenEventID && $0.important }
         lastSeenEventID = events.last?.id ?? lastSeenEventID
         guard !fresh.isEmpty else { return }
-        toasts.append(contentsOf: fresh.suffix(3))
-        if toasts.count > 3 { toasts.removeFirst(toasts.count - 3) }
         if autoPause { speed = 0 }
+        let keep = fresh.suffix(2)
+        toasts = Array(toasts.suffix(2 - min(2, keep.count))) + keep
         for event in fresh.suffix(3) {
             Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                try? await Task.sleep(nanoseconds: 4_500_000_000)
                 self?.toasts.removeAll { $0.id == event.id }
             }
         }
@@ -289,6 +296,14 @@ final class GameStore: ObservableObject {
     func orderSelected(to province: Int) {
         guard let lead = selectedArmy else { return }
         let ids = [lead] + armyGroup.sorted()
+        if waypointMode || waypointLocked {
+            perform { sim, _ in
+                var last = ActionResult(success: false, message: "")
+                for id in ids { last = sim.appendRoute(id, via: province) }
+                return last
+            }
+            return
+        }
         if ids.count == 1 {
             perform { sim, _ in sim.orderArmy(lead, to: province) }
             return
@@ -374,6 +389,7 @@ final class GameStore: ObservableObject {
         selectedCountry = nil
         selectedArmy = nil
         armyGroup = []
+        waypointLocked = false
         refreshMap()
     }
 

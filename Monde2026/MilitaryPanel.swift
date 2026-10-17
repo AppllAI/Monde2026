@@ -8,18 +8,34 @@ import SwiftUI
 
 struct MilitaryPanel: View {
     @ObservedObject var store: GameStore
+    @AppStorage("militaryTab") private var tab = 0
 
     var body: some View {
         if let sim = store.sim, let c = store.player {
             PanelHeader(title: "Armée", subtitle: c.name, flag: c.id) { store.panel = nil }
-            overview(sim, c)
-            WarsCard(store: store, sim: sim, country: c)
-            PostureCard(store: store, country: c)
-            BattlesCard(store: store)
-            ArmiesCard(store: store, sim: sim, country: c)
-            DivisionsCard(store: store, country: c)
-            ConscriptionCard(store: store, country: c)
-            EquipmentCard(country: c)
+            Picker("", selection: $tab) {
+                Text("Armées").tag(0)
+                Text("Recrutement").tag(1)
+                Text("Guerres").tag(2)
+                Text("Matériel").tag(3)
+            }
+            .pickerStyle(.segmented)
+            switch tab {
+            case 0:
+                ArmyBuilderCard(store: store, sim: sim, country: c)
+                ArmiesCard(store: store, sim: sim, country: c)
+                BasesCard(store: store, sim: sim, country: c)
+            case 1:
+                overview(sim, c)
+                DivisionsCard(store: store, country: c)
+                ConscriptionCard(store: store, country: c)
+            case 2:
+                BattlesCard(store: store)
+                WarsCard(store: store, sim: sim, country: c)
+                PostureCard(store: store, country: c)
+            default:
+                EquipmentCard(country: c)
+            }
         }
     }
 
@@ -230,46 +246,150 @@ struct ArmiesCard: View {
 
     var body: some View {
         let mine = sim.armies(of: country.id)
-        let free = sim.unassignedCount(country.id)
-        Dossier(title: "Armées sur la carte",
-                subtitle: "\(mine.count) armées, \(free) divisions en garnison. Les garnisons défendent vos régions, surtout au front.") {
-            Toggle(isOn: Binding(
-                get: { sim.state.autoArmies },
-                set: { value in store.mutate { $0.setAutoArmies(value) } })) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Commandement automatique").font(.system(size: 14)).foregroundStyle(Theme.paper)
-                    Text("Vos généraux déploient et attaquent seuls.").font(Theme.small).foregroundStyle(Theme.steel)
-                }
-            }
-            .tint(Theme.amber)
+        Dossier(title: "Vos armées (\(mine.count))", subtitle: "Touchez une armée pour la voir sur la carte et lui donner des ordres.") {
             ForEach(mine) { a in
                 Button { store.selectArmy(a.id) } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: a.engaged ? "flame.fill" : (a.path.isEmpty ? "shield.fill" : "arrow.right.circle.fill"))
-                            .foregroundStyle(a.engaged ? Theme.coral : Theme.amber).frame(width: 22)
+                        UnitSymbol(type: a.mainType, color: Color(uiColor: Theme.politicalColor(a.owner)), size: 30)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(a.name) : \(a.count) div. · \(a.general.name) \(a.general.stars)").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.paper)
-                            Text(sim.armyStatus(a)).font(Theme.small).foregroundStyle(Theme.steel).lineLimit(1)
+                            HStack(spacing: 6) {
+                                Text(a.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
+                                Text("\(a.count)/\(Army.maxDivisions)").font(Theme.data(11)).foregroundStyle(Theme.steel)
+                            }
+                            Text(sim.armyStatus(a)).font(Theme.small)
+                                .foregroundStyle(a.engaged ? Theme.coral : Theme.steel).lineLimit(1)
                         }
                         Spacer()
-                        Text(Fmt.pct(a.organization, 0)).font(Theme.data(12)).foregroundStyle(Theme.steel)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Exp. \(Fmt.pct(a.experience, 0))").font(Theme.data(11)).foregroundStyle(Theme.amber)
+                            Text("Moral \(Fmt.pct(a.organization, 0))").font(Theme.data(11)).foregroundStyle(Theme.steel)
+                        }
                         Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.steel)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
-            if free > 0 {
-                HStack(spacing: 8) {
-                    ForEach([5, 10, free].filter { $0 <= free }.removingDuplicates(), id: \.self) { n in
-                        QuietButton(title: n == free ? "Former avec tout (\(n))" : "Former une armée de \(n)",
-                                    icon: "plus", tint: Theme.amber) {
-                            let id = country.id
-                            store.perform { s, _ in s.createArmy(for: id, size: n) }
-                        }
+            Toggle(isOn: Binding(
+                get: { sim.state.autoArmies },
+                set: { value in store.mutate { $0.setAutoArmies(value) } })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Commandement automatique").font(.system(size: 14)).foregroundStyle(Theme.paper)
+                    Text("Vos généraux déploient et attaquent seuls en guerre.").font(Theme.small).foregroundStyle(Theme.steel)
+                }
+            }
+            .tint(Theme.amber)
+        }
+    }
+}
+
+/// Former une armée soi-même : choisir le nombre de divisions de chaque type (30 au maximum) et la base de départ.
+struct ArmyBuilderCard: View {
+    @ObservedObject var store: GameStore
+    let sim: Simulation
+    let country: Country
+    @State private var pick: [DivisionType: Int] = [:]
+    @State private var base: Int = -1
+
+    var body: some View {
+        let reserve = sim.unassignedDivisions(country.id)
+        let total = pick.values.reduce(0, +)
+        let bases = sim.bases(of: country.id)
+        Dossier(title: "Former une armée",
+                subtitle: "Réserve : \(reserve.values.reduce(0, +)) divisions. Elles défendent vos régions tant qu'elles ne sont pas en armée.") {
+            ForEach(DivisionType.allCases.filter { (reserve[$0] ?? 0) > 0 }, id: \.self) { t in
+                let available = reserve[t] ?? 0
+                let n = pick[t] ?? 0
+                HStack(spacing: 10) {
+                    UnitSymbol(type: t, color: Theme.steel.opacity(0.6), size: 26)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(t.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.paper)
+                        Text("\(available) en réserve").font(.system(size: 10)).foregroundStyle(Theme.steel)
+                    }
+                    Spacer()
+                    stepButton("minus", enabled: n > 0) { pick[t] = max(0, n - 1) }
+                    Text("\(n)").font(Theme.data(16, weight: .bold)).foregroundStyle(Theme.paper).frame(minWidth: 30)
+                    stepButton("plus", enabled: n < available && total < Army.maxDivisions) { pick[t] = n + 1 }
+                    stepButton("plus.square.on.square", enabled: n < available && total < Army.maxDivisions) {
+                        pick[t] = min(available, n + min(5, Army.maxDivisions - total))
                     }
                 }
             }
+            if !bases.isEmpty {
+                Picker("Rassemblement", selection: $base) {
+                    Text(sim.isAtWar(country.id) ? "Au front" : "Base principale").tag(-1)
+                    ForEach(bases, id: \.self) { b in Text("Base de \(ProvinceMap.all[b].name)").tag(b) }
+                }
+                .tint(Theme.amber)
+            }
+            HStack {
+                Text("\(total)/\(Army.maxDivisions) divisions").font(Theme.data(13, weight: .semibold))
+                    .foregroundStyle(total == Army.maxDivisions ? Theme.amber : Theme.steel)
+                Spacer()
+                QuietButton(title: "Tout auto", icon: "wand.and.stars") {
+                    var left = Army.maxDivisions
+                    var p: [DivisionType: Int] = [:]
+                    for t in DivisionType.allCases {
+                        let n = min(left, reserve[t] ?? 0)
+                        p[t] = n
+                        left -= n
+                    }
+                    pick = p
+                }
+            }
+            ActionButton(title: "Former l'armée", icon: "plus", enabled: total > 0) {
+                let id = country.id
+                let composition = pick
+                let place: Int? = base >= 0 ? base : nil
+                store.perform { s, _ in s.createArmy(for: id, composition: composition, at: place) }
+                pick = [:]
+            }
+        }
+    }
+
+    private func stepButton(_ icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 14, weight: .bold))
+                .foregroundStyle(enabled ? Theme.paper : Theme.steel.opacity(0.4))
+                .frame(width: 38, height: 38)
+                .background(Color.white.opacity(enabled ? 0.09 : 0.03), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+}
+
+struct BasesCard: View {
+    @ObservedObject var store: GameStore
+    let sim: Simulation
+    let country: Country
+
+    var body: some View {
+        let bases = sim.bases(of: country.id)
+        let jobs = sim.state.constructions.filter { $0.owner == country.id }
+        Dossier(title: "Bases et forts",
+                subtitle: "Pour construire : touchez une de vos régions sur la carte, onglet Région.") {
+            ForEach(bases, id: \.self) { b in
+                let here = sim.state.armies.filter { $0.province == b && $0.owner == country.id }
+                HStack(spacing: 10) {
+                    Image(systemName: "star.square.fill").foregroundStyle(Theme.amber)
+                    Text("Base de \(ProvinceMap.all[b].name)").font(.system(size: 14)).foregroundStyle(Theme.paper)
+                    Spacer()
+                    Text(here.isEmpty ? "vide" : "\(here.count) armée(s)").font(Theme.small).foregroundStyle(Theme.steel)
+                }
+            }
+            ForEach(jobs) { job in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Image(systemName: job.kind.icon).foregroundStyle(Theme.sky)
+                        Text("\(job.kind.name) à \(ProvinceMap.all[job.province].name)").font(.system(size: 13)).foregroundStyle(Theme.paper)
+                        Spacer()
+                        Text("\(job.daysLeft) j").font(Theme.data(12)).foregroundStyle(Theme.steel)
+                    }
+                    Meter(value: job.progress, tint: Theme.sky, height: 4)
+                }
+            }
+            Text("Forts : \(sim.fortCount(country.id)) régions fortifiées.").font(Theme.small).foregroundStyle(Theme.steel)
         }
     }
 }

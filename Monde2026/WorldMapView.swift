@@ -34,6 +34,10 @@ struct RGBA: Equatable {
     var cgColor: CGColor {
         CGColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: CGFloat(a) / 255)
     }
+
+    var uiColor: UIColor {
+        UIColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: CGFloat(a) / 255)
+    }
 }
 
 struct ProvinceFill: Equatable {
@@ -73,6 +77,18 @@ struct ArmyMarker: Equatable, Identifiable {
     let isPlayer: Bool
     let selected: Bool
     let engaged: Bool
+    var mainType: DivisionType = .infantry
+    var mix: [Double] = []          // part de chaque type de division (ordre de DivisionType.allCases)
+    var training = false
+}
+
+/// Fort ou base sur la carte.
+struct StructureMarker: Equatable {
+    let x: Double
+    let y: Double
+    let fort: Int
+    let base: Bool
+    let building: Bool
 }
 
 /// Trajet d'une armée (points MapKit).
@@ -91,6 +107,8 @@ struct BattleMarker: Equatable, Identifiable {
     let attackerColor: RGBA
     let defenderColor: RGBA
     let side: Int                    // 1 le joueur attaque, -1 il défend, 0 non concerné
+    var progress: Double = 0         // avancée de la prise
+    var fronts: [CGPoint] = []       // d'où partent les attaques
 }
 
 /// Ce que l'on a touché sur la carte.
@@ -109,6 +127,7 @@ struct MapSnapshot: Equatable {
     var armies: [ArmyMarker] = []
     var routes: [ArmyRoute] = []
     var battles: [BattleMarker] = []
+    var structures: [StructureMarker] = []
 
     static let empty = MapSnapshot(fills: [], borders: [], labels: [], plans: [], selectedProvince: nil)
 }
@@ -274,9 +293,13 @@ enum MapSnapshotBuilder {
             let slot = slots[a.province, default: 0]
             slots[a.province] = slot + 1
             let isPlayer = a.owner == player
+            let total = Double(max(1, a.count))
             markers.append(ArmyMarker(id: a.id, x: lp.x, y: lp.y, slot: slot, text: "\(a.count)", flag: Geo.flag(a.owner),
                                       color: RGBA(Theme.politicalColor(a.owner)), isPlayer: isPlayer,
-                                      selected: a.id == selectedArmy || group.contains(a.id), engaged: a.engaged))
+                                      selected: a.id == selectedArmy || group.contains(a.id), engaged: a.engaged,
+                                      mainType: a.mainType,
+                                      mix: DivisionType.allCases.map { Double(a.divisions[$0] ?? 0) / total },
+                                      training: a.training && a.path.isEmpty))
             if isPlayer && !a.path.isEmpty {
                 var pts = [CGPoint(x: lp.x, y: lp.y)]
                 var hostile: Int?
@@ -295,13 +318,25 @@ enum MapSnapshotBuilder {
             battleMarkers.append(BattleMarker(id: b.province, x: lp.x, y: lp.y, balance: b.balance,
                                               attackerColor: RGBA(Theme.politicalColor(b.attacker)),
                                               defenderColor: RGBA(Theme.politicalColor(b.defender)),
-                                              side: sim.playerSide(in: b)))
+                                              side: sim.playerSide(in: b), progress: b.captureProgress,
+                                              fronts: b.fronts.map { f in
+                                                  let q = provinces[f].labelPoint
+                                                  return CGPoint(x: q.x, y: q.y)
+                                              }))
+        }
+        var structures: [StructureMarker] = []
+        let building = Set(sim.state.constructions.map { $0.province })
+        for p in Set(sim.state.forts.keys).union(sim.state.bases).union(building).sorted() {
+            let lp = provinces[p].labelPoint
+            structures.append(StructureMarker(x: lp.x, y: lp.y, fort: sim.fortLevel(p), base: sim.state.bases.contains(p),
+                                              building: building.contains(p)))
         }
         var snap = MapSnapshot(fills: fills, borders: borders, labels: labels, plans: plans,
                                selectedProvince: selectedProvince)
         snap.armies = markers
         snap.routes = routes
         snap.battles = battleMarkers
+        snap.structures = structures
         return snap
     }
 
@@ -587,9 +622,22 @@ final class ProvinceRenderer: MKOverlayRenderer {
         let showAll = zoomScale > 1.0 / 32768
         // Les tuiles sont dessinées en pixels (écran Retina) : on double la taille pour avoir de vrais points.
         let unit = px * 2
+        // 7a. Forts et bases (de près)
+        if zoomScale > 1.0 / 16384 {
+            for st in snap.structures {
+                let c = CGPoint(x: CGFloat(st.x) - 40 * unit, y: CGFloat(st.y) + 22 * unit)
+                guard MKMapRect(x: Double(c.x) - 40, y: Double(c.y) - 40, width: 80, height: 80)
+                    .insetBy(dx: -Double(30 * unit), dy: -Double(30 * unit)).intersects(mapRect) else { continue }
+                drawStructure(st, at: c, px: unit, context: context)
+            }
+        }
+        // 7b. Flèches d'attaque des batailles (sous les pions)
+        for b in snap.battles where b.side != 0 || showAll {
+            for f in b.fronts { drawAttackArrow(from: f, to: CGPoint(x: b.x, y: b.y), color: b.attackerColor, px: unit, context: context) }
+        }
         for m in snap.armies where m.isPlayer || m.selected || showAll {
-            let w = 50 * unit, h = 24 * unit
-            let cx = CGFloat(m.x) + CGFloat(m.slot) * 54 * unit
+            let w = 62 * unit, h = 26 * unit
+            let cx = CGFloat(m.x) + CGFloat(m.slot) * 66 * unit
             let cy = CGFloat(m.y)
             let box = CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
             guard MKMapRect(x: Double(box.minX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
@@ -599,7 +647,7 @@ final class ProvinceRenderer: MKOverlayRenderer {
         // 8. Batailles (au-dessus des pions)
         for b in snap.battles where b.side != 0 || showAll {
             let r = 15 * unit
-            let c = CGPoint(x: CGFloat(b.x), y: CGFloat(b.y) - 30 * unit)
+            let c = CGPoint(x: CGFloat(b.x), y: CGFloat(b.y) - 32 * unit)
             let box = CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)
             guard MKMapRect(x: Double(box.minX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
                 .insetBy(dx: -Double(r), dy: -Double(r)).intersects(mapRect) else { continue }
@@ -645,68 +693,165 @@ final class ProvinceRenderer: MKOverlayRenderer {
     }
 
     private func drawMarker(_ m: ArmyMarker, in box: CGRect, px: CGFloat, context: CGContext) {
-        let path = UIBezierPath(roundedRect: box, cornerRadius: 6 * px).cgPath
+        let path = UIBezierPath(roundedRect: box, cornerRadius: 5 * px).cgPath
         context.saveGState()
         context.setShadow(offset: CGSize(width: 0, height: 1.5 * px), blur: 4 * px, color: UIColor.black.withAlphaComponent(0.6).cgColor)
         context.addPath(path)
-        context.setFillColor(UIColor(red: 0.06, green: 0.09, blue: 0.13, alpha: 0.92).cgColor)
+        context.setFillColor(UIColor(red: 0.06, green: 0.09, blue: 0.13, alpha: 0.94).cgColor)
         context.fillPath()
         context.restoreGState()
-        // Bande de couleur du pays
-        let band = CGRect(x: box.minX, y: box.minY, width: 6 * px, height: box.height)
-        context.saveGState()
-        context.addPath(path)
-        context.clip()
+        // Symbole d'unité (style OTAN) dans la couleur du pays
+        let sym = CGRect(x: box.minX + 4 * px, y: box.minY + 4 * px, width: 25 * px, height: 15 * px)
         context.setFillColor(m.color.cgColor)
-        context.fill(band)
+        context.fill(sym)
+        context.setStrokeColor(UIColor.white.cgColor)
+        context.setLineWidth(1.3 * px)
+        context.stroke(sym)
+        context.saveGState()
+        context.clip(to: sym)
+        for p in UnitGlyph.paths(m.mainType, in: sym) {
+            context.addPath(p.cgPath)
+        }
+        context.setLineWidth(1.4 * px)
+        context.strokePath()
         context.restoreGState()
+        // Mélange des troupes : petite barre colorée en bas
+        if m.mix.count == DivisionType.allCases.count {
+            let colors: [UIColor] = [UIColor(white: 0.85, alpha: 1), UIColor(Theme.sky), UIColor(Theme.amber),
+                                     UIColor(Theme.teal), UIColor(red: 0.3, green: 0.5, blue: 0.95, alpha: 1)]
+            var x = box.minX + 4 * px
+            let width = box.width - 8 * px
+            for (k, share) in m.mix.enumerated() where share > 0 {
+                let w = width * CGFloat(share)
+                context.setFillColor(colors[k].cgColor)
+                context.fill(CGRect(x: x, y: box.maxY - 4.5 * px, width: w, height: 2.5 * px))
+                x += w
+            }
+        }
         // Contour
-        let stroke: UIColor = m.selected ? UIColor(Theme.amber) : (m.engaged ? UIColor(Theme.coral) : UIColor.white.withAlphaComponent(m.isPlayer ? 0.8 : 0.4))
+        let stroke: UIColor = m.selected ? UIColor(Theme.amber) : (m.engaged ? UIColor(Theme.coral) : UIColor.white.withAlphaComponent(m.isPlayer ? 0.75 : 0.35))
         context.addPath(path)
         context.setStrokeColor(stroke.cgColor)
-        context.setLineWidth((m.selected ? 2.5 : 1.2) * px)
+        context.setLineWidth((m.selected ? 2.6 : 1.2) * px)
         context.strokePath()
-        // Drapeau + nombre de divisions
-        let text = (m.flag + " " + m.text + (m.engaged ? " ⚔︎" : "")) as NSString
+        // Nombre de divisions
+        let text = m.text as NSString
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold),
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .heavy),
             .foregroundColor: UIColor.white
         ]
         let size = text.size(withAttributes: attrs)
         context.saveGState()
-        context.translateBy(x: box.midX + 3 * px, y: box.midY)
+        context.translateBy(x: box.minX + 46 * px, y: box.midY - 1 * px)
         context.scaleBy(x: px, y: px)
         text.draw(at: CGPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attrs)
         context.restoreGState()
+        // Entraînement : petite étoile
+        if m.training {
+            context.setFillColor(UIColor(Theme.amber).cgColor)
+            context.fillEllipse(in: CGRect(x: box.maxX - 6 * px, y: box.minY - 3 * px, width: 9 * px, height: 9 * px))
+        }
+    }
+
+    private func drawAttackArrow(from a: CGPoint, to b: CGPoint, color: RGBA, px: CGFloat, context: CGContext) {
+        let dx = b.x - a.x, dy = b.y - a.y
+        let len = hypot(dx, dy)
+        guard len > 1 else { return }
+        let ux = dx / len, uy = dy / len
+        let start = CGPoint(x: a.x + ux * len * 0.18, y: a.y + uy * len * 0.18)
+        let tip = CGPoint(x: a.x + ux * len * 0.82, y: a.y + uy * len * 0.82)
+        let head = min(18 * px, len * 0.3)
+        let base = CGPoint(x: tip.x - ux * head, y: tip.y - uy * head)
+        let nx = -uy, ny = ux
+        context.saveGState()
+        context.setLineCap(.round)
+        // Contour sombre puis couleur de l'attaquant
+        for (w, c) in [(9 * px, UIColor.black.withAlphaComponent(0.55)), (5.5 * px, color.uiColor)] {
+            context.setStrokeColor(c.cgColor)
+            context.setLineWidth(w)
+            context.move(to: start)
+            context.addLine(to: base)
+            context.strokePath()
+        }
+        context.setFillColor(color.uiColor.cgColor)
+        context.setStrokeColor(UIColor.black.withAlphaComponent(0.55).cgColor)
+        context.setLineWidth(1.5 * px)
+        context.move(to: tip)
+        context.addLine(to: CGPoint(x: base.x + nx * head * 0.7, y: base.y + ny * head * 0.7))
+        context.addLine(to: CGPoint(x: base.x - nx * head * 0.7, y: base.y - ny * head * 0.7))
+        context.closePath()
+        context.drawPath(using: .fillStroke)
+        context.restoreGState()
+    }
+
+    private func drawStructure(_ st: StructureMarker, at c: CGPoint, px: CGFloat, context: CGContext) {
+        var x = c.x
+        if st.fort > 0 || st.building {
+            let r = CGRect(x: x - 9 * px, y: c.y - 9 * px, width: 18 * px, height: 18 * px)
+            context.setFillColor(UIColor(red: 0.12, green: 0.14, blue: 0.18, alpha: 0.92).cgColor)
+            context.fill(r)
+            // Créneaux
+            context.setFillColor(UIColor(white: 0.85, alpha: 1).cgColor)
+            let w = r.width / 5
+            for k in [0, 2, 4] {
+                context.fill(CGRect(x: r.minX + CGFloat(k) * w, y: r.minY + 2 * px, width: w, height: 4 * px))
+            }
+            context.fill(CGRect(x: r.minX, y: r.minY + 6 * px, width: r.width, height: r.height - 8 * px))
+            let text = (st.fort > 0 ? "\(st.fort)" : "…") as NSString
+            let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 9, weight: .heavy),
+                                                        .foregroundColor: UIColor.black]
+            let size = text.size(withAttributes: attrs)
+            context.saveGState()
+            context.translateBy(x: r.midX, y: r.midY + 2.5 * px)
+            context.scaleBy(x: px, y: px)
+            text.draw(at: CGPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attrs)
+            context.restoreGState()
+            x += 21 * px
+        }
+        if st.base {
+            let r = CGRect(x: x - 9 * px, y: c.y - 9 * px, width: 18 * px, height: 18 * px)
+            context.setFillColor(UIColor(Theme.amber).cgColor)
+            context.fill(r)
+            let text = "★" as NSString
+            let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 12, weight: .bold),
+                                                        .foregroundColor: UIColor.black]
+            let size = text.size(withAttributes: attrs)
+            context.saveGState()
+            context.translateBy(x: r.midX, y: r.midY)
+            context.scaleBy(x: px, y: px)
+            text.draw(at: CGPoint(x: -size.width / 2, y: -size.height / 2), withAttributes: attrs)
+            context.restoreGState()
+        }
     }
 
     private func drawBattle(_ b: BattleMarker, center c: CGPoint, radius r: CGFloat, px: CGFloat, context: CGContext) {
+        // Badge : ⚔︎ + avancée de la prise, avec une barre de progression.
+        let box = CGRect(x: c.x - 26 * px, y: c.y - 11 * px, width: 52 * px, height: 22 * px)
+        let path = UIBezierPath(roundedRect: box, cornerRadius: 11 * px).cgPath
+        let tint: UIColor
+        if b.side == 0 { tint = UIColor(white: 0.7, alpha: 1) } else {
+            let winning = b.side == 1 ? b.balance > 0.5 : b.balance < 0.5
+            tint = winning ? UIColor(Theme.teal) : UIColor(Theme.coral)
+        }
         context.saveGState()
         context.setShadow(offset: CGSize(width: 0, height: 1.5 * px), blur: 5 * px, color: UIColor.black.withAlphaComponent(0.7).cgColor)
-        context.setFillColor(UIColor(red: 0.10, green: 0.05, blue: 0.05, alpha: 0.94).cgColor)
-        context.fillEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+        context.addPath(path)
+        context.setFillColor(UIColor(red: 0.10, green: 0.05, blue: 0.05, alpha: 0.95).cgColor)
+        context.fillPath()
         context.restoreGState()
-        // Anneau : la part de l'attaquant (en haut, sens horaire) contre celle du défenseur.
-        let ring = r - 2 * px
-        let start = -CGFloat.pi / 2
-        let split = start + CGFloat(b.balance) * 2 * .pi
-        context.setLineWidth(3.5 * px)
-        context.setLineCap(.butt)
-        context.setStrokeColor(b.attackerColor.cgColor)
-        context.addArc(center: c, radius: ring, startAngle: start, endAngle: split, clockwise: false)
+        context.saveGState()
+        context.addPath(path)
+        context.clip()
+        context.setFillColor(b.attackerColor.uiColor.withAlphaComponent(0.55).cgColor)
+        context.fill(CGRect(x: box.minX, y: box.minY, width: box.width * CGFloat(b.progress), height: box.height))
+        context.restoreGState()
+        context.addPath(path)
+        context.setStrokeColor(tint.cgColor)
+        context.setLineWidth(1.8 * px)
         context.strokePath()
-        context.setStrokeColor(b.defenderColor.cgColor)
-        context.addArc(center: c, radius: ring, startAngle: split, endAngle: start + 2 * .pi, clockwise: false)
-        context.strokePath()
-        // Contour : vert si le joueur prend l'avantage, rouge s'il le perd.
-        if b.side != 0 {
-            let winning = b.side == 1 ? b.balance > 0.5 : b.balance < 0.5
-            context.setStrokeColor((winning ? UIColor(Theme.teal) : UIColor(Theme.coral)).cgColor)
-            context.setLineWidth(1.5 * px)
-            context.strokeEllipse(in: CGRect(x: c.x - r - 1.5 * px, y: c.y - r - 1.5 * px, width: 2 * r + 3 * px, height: 2 * r + 3 * px))
-        }
-        let text = "⚔︎" as NSString
-        let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 15, weight: .heavy), .foregroundColor: UIColor.white]
+        let text = "⚔︎ \(Int(b.progress * 100))%" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .heavy),
+                                                    .foregroundColor: UIColor.white]
         let size = text.size(withAttributes: attrs)
         context.saveGState()
         context.translateBy(x: c.x, y: c.y)
@@ -782,15 +927,15 @@ final class MapCoordinator: NSObject, MKMapViewDelegate {
             var best: (MapTap, CGFloat)?
             for b in snap.battles where b.side != 0 || showAll {
                 let c = screen(b.x, b.y)
-                let d = hypot(point.x - c.x, point.y - (c.y - 30))
-                if d < 26 && d < (best?.1 ?? .infinity) { best = (.battle(b.id), d) }
+                let d = hypot(point.x - c.x, point.y - (c.y - 32))
+                if d < 30 && d < (best?.1 ?? .infinity) { best = (.battle(b.id), d) }
             }
             for m in snap.armies where m.isPlayer || m.selected || showAll {
                 let c = screen(m.x, m.y)
-                let cx = c.x + CGFloat(m.slot) * 54
+                let cx = c.x + CGFloat(m.slot) * 66
                 let dx = abs(point.x - cx), dy = abs(point.y - c.y)
                 // Les pions du joueur sont prioritaires ; zone tactile généreuse.
-                if dx < 32 && dy < 20 {
+                if dx < 36 && dy < 22 {
                     let d = hypot(dx, dy) - (m.isPlayer ? 8 : 0)
                     if d < (best?.1 ?? .infinity) { best = (.army(m.id), d) }
                 }

@@ -237,7 +237,16 @@ enum DivisionType: String, Codable, CaseIterable {
         }
     }
 
+    /// Une division du jeu = une brigade d'environ 6 000 hommes (moitié des valeurs de référence) :
+    /// des effectifs plus nombreux, plus faciles à répartir en armées.
     var stats: DivisionStats {
+        let r = referenceStats
+        return DivisionStats(manpower: r.manpower * 0.5, equipment: r.equipment.mapValues { $0 * 0.5 },
+                             softAttack: r.softAttack * 0.5, hardAttack: r.hardAttack * 0.5, defense: r.defense * 0.5,
+                             breakthrough: r.breakthrough * 0.5, hardness: r.hardness)
+    }
+
+    private var referenceStats: DivisionStats {
         switch self {
         case .infantry:
             return DivisionStats(manpower: 12,

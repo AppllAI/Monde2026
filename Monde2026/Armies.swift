@@ -27,10 +27,23 @@ struct Army: Codable, Identifiable {
     var amphibious: Bool         // débarquement en cours
     var general: General = .staff
     var stance: ArmyStance = .balanced
-    var planning: Double = 0     // 0…1 : offensive préparée
+    var experience: Double = 0.3 // 0…1 : entraînement des troupes
+    var training: Bool = false   // à l'entraînement (deux fois plus vite dans une base)
     var supply: Double = 1       // 0…1 : ravitaillement
 
+    static let maxDivisions = 30
+
     var count: Int { divisions.values.reduce(0, +) }
+
+    /// Type de division dominant (pour le symbole sur la carte).
+    var mainType: DivisionType {
+        let armor = (divisions[.armored] ?? 0)
+        let mech = (divisions[.mechanized] ?? 0)
+        let total = max(1, count)
+        if Double(armor) / Double(total) >= 0.3 { return .armored }
+        if Double(armor + mech) / Double(total) >= 0.35 { return .mechanized }
+        return DivisionType.allCases.max { (divisions[$0] ?? 0) < (divisions[$1] ?? 0) } ?? .infantry
+    }
     var destination: Int? { path.last }
 
     var isMotorized: Bool {
@@ -210,6 +223,7 @@ extension Simulation {
             total += Double(n) * (s.softAttack * (1 - h) + s.hardAttack * h + s.breakthrough * 0.5) * armor
         }
         return (total * c.combatMultiplier + droneSupport(c, armyCount: a.count)) * c.posture.attack * (0.3 + 0.7 * a.organization)
+            * (0.8 + 0.4 * a.experience)
     }
 
     func armyDefense(_ a: Army, vsHardness h: Double) -> Double {
@@ -222,7 +236,7 @@ extension Simulation {
         // Retranchement progressif : jusqu'à +50 % après un mois sur place.
         let entrenched = 1 + min(0.5, Double(a.daysInPlace) / 60)
         return (total * c.combatMultiplier + droneSupport(c, armyCount: a.count)) * c.posture.defense
-            * (0.3 + 0.7 * a.organization) * entrenched
+            * (0.3 + 0.7 * a.organization) * entrenched * (0.8 + 0.4 * a.experience)
     }
 
     /// Appui des drones : rendements décroissants (des milliers de drones ne remplacent pas une armée).
@@ -237,7 +251,7 @@ extension Simulation {
         guard let c = state.countries[id] else { return 0 }
         var total = 0.0
         for (t, n) in unassignedDivisions(id) {
-            total += Double(n) * (t.stats.defense + 9)
+            total += Double(n) * (t.stats.defense + 4.5)
         }
         total *= c.combatMultiplier * c.posture.defense
         let share: Double
@@ -330,16 +344,29 @@ extension Simulation {
     // MARK: - Ordres (joueur et IA)
 
     @discardableResult
-    mutating func createArmy(for id: CountryID, size: Int, at province: Int? = nil) -> ActionResult {
+    mutating func createArmy(for id: CountryID, composition: [DivisionType: Int], at province: Int? = nil) -> ActionResult {
+        let left = unassignedDivisions(id)
+        var picked: [DivisionType: Int] = [:]
+        var total = 0
+        for t in DivisionType.allCases {
+            let n = min(composition[t] ?? 0, left[t] ?? 0, Army.maxDivisions - total)
+            if n > 0 { picked[t] = n; total += n }
+        }
+        guard total > 0 else { return ActionResult(success: false, message: "Aucune division disponible de ce type.") }
+        return createArmy(for: id, size: total, at: province, picked: picked)
+    }
+
+    mutating func createArmy(for id: CountryID, size: Int, at province: Int? = nil, picked forced: [DivisionType: Int]? = nil) -> ActionResult {
         var left = unassignedDivisions(id)
+        let size = min(size, Army.maxDivisions)
         let available = left.values.reduce(0, +)
         guard available > 0 else {
             return ActionResult(success: false, message: "Toutes vos divisions sont déjà dans des armées. Recrutez-en d'autres.")
         }
         let wanted = min(size, available)
-        var picked: [DivisionType: Int] = [:]
-        // Composition proportionnelle à la garnison.
-        for t in DivisionType.allCases {
+        var picked: [DivisionType: Int] = forced ?? [:]
+        // Composition proportionnelle à la réserve.
+        for t in DivisionType.allCases where forced == nil {
             let n = left[t] ?? 0
             let take = Int((Double(n) * Double(wanted) / Double(available)).rounded())
             picked[t] = min(n, take)
@@ -353,16 +380,24 @@ extension Simulation {
         }
         picked = picked.filter { $0.value > 0 }
         guard total > 0 else { return ActionResult(success: false, message: "Aucune division disponible.") }
-        let place = province ?? deploymentProvince(for: id) ?? homeProvince(for: id)
+        if forced != nil { total = picked.values.reduce(0, +) }
+        let place = province ?? (isAtWar(id) ? deploymentProvince(for: id) : nil) ?? bases(of: id).first ?? homeProvince(for: id)
         guard let start = place else { return ActionResult(success: false, message: "Aucune région où rassembler l'armée.") }
-        let number = (state.armies.filter { $0.owner == id }.map { $0.id }.count) + 1
-        let name = number == 1 ? "1re armée" : "\(number)e armée"
+        let name = nextArmyName(for: id)
         let general = makeGeneral(for: id, divisions: picked)
+        let experience = startingExperience(id)
         state.armies.append(Army(id: state.nextArmyID, owner: id, name: name, province: start, divisions: picked,
                                  path: [], progress: 0, organization: 1, daysInPlace: 0, engaged: false, amphibious: false,
-                                 general: general))
+                                 general: general, experience: experience))
         state.nextArmyID += 1
         return ActionResult(success: true, message: "\(name) formée : \(total) divisions à \(ProvinceMap.all[start].name), sous les ordres du \(general.name).")
+    }
+
+    func nextArmyName(for id: CountryID) -> String {
+        let used = Set(state.armies.filter { $0.owner == id }.map { $0.name })
+        var n = 1
+        while used.contains(n == 1 ? "1re armée" : "\(n)e armée") { n += 1 }
+        return n == 1 ? "1re armée" : "\(n)e armée"
     }
 
     /// Région de rassemblement : au front si l'on est en guerre, sinon la capitale.
@@ -395,12 +430,58 @@ extension Simulation {
         state.armies[i].amphibious = r.amphibious
         state.armies[i].progress = 0
         state.armies[i].engaged = false
+        state.armies[i].training = false
         let dest = ProvinceMap.all[target].name
         let foes = enemies(of: state.armies[i].owner)
         let hostile = r.path.filter { foes.contains(controller(of: $0)) }.count
         if r.amphibious { return ActionResult(success: true, message: "Débarquement ordonné vers \(dest).") }
         if hostile > 1 { return ActionResult(success: true, message: "Offensive vers \(dest) : \(hostile) régions ennemies à prendre l'une après l'autre.") }
         return ActionResult(success: true, message: hostile == 1 ? "Attaque sur \(dest)." : "En route vers \(dest) (\(r.path.count) régions).")
+    }
+
+    /// Ajoute une étape : l'armée finit son trajet actuel puis va jusqu'à cette région (détours, contournements).
+    mutating func appendRoute(_ armyID: Int, via target: Int) -> ActionResult {
+        guard let i = state.armies.firstIndex(where: { $0.id == armyID }) else {
+            return ActionResult(success: false, message: "Armée introuvable.")
+        }
+        var ghost = state.armies[i]
+        let from = ghost.path.last ?? ghost.province
+        guard from != target else { return ActionResult(success: false, message: "L'armée passe déjà par là.") }
+        ghost.province = from
+        let offensive = enemies(of: ghost.owner).contains(controller(of: target))
+        guard let r = route(for: ghost, to: target, throughEnemy: offensive), !r.amphibious || ghost.path.isEmpty else {
+            return ActionResult(success: false, message: "Pas de chemin vers \(ProvinceMap.all[target].name).")
+        }
+        if state.armies[i].path.isEmpty {
+            state.armies[i].amphibious = r.amphibious
+            state.armies[i].progress = 0
+        }
+        state.armies[i].path += r.path
+        state.armies[i].training = false
+        return ActionResult(success: true, message: "Étape ajoutée : \(ProvinceMap.all[target].name) (\(state.armies[i].path.count) régions au total).")
+    }
+
+    /// Début de partie : les divisions du joueur sont déjà rangées en armées, dans leurs bases.
+    mutating func formStartingArmies(_ id: CountryID) {
+        guard let c = state.countries[id], armies(of: id).isEmpty else { return }
+        let atWar = isAtWar(id)
+        let own = bases(of: id)
+        let target = Int(Double(c.divisionCount) * 0.85)
+        var k = 0
+        var guardCount = 0
+        while armies(of: id).reduce(0, { $0 + $1.count }) < target && unassignedCount(id) > 0 && guardCount < 40 {
+            guardCount += 1
+            let size = min(Army.maxDivisions, max(4, min(20, c.divisionCount / 4)))
+            let front = atWar ? Array(frontierProvinces(id, enemies: enemies(of: id))).sorted() : []
+            let place: Int? = !front.isEmpty ? front[k % front.count] : (own.isEmpty ? nil : own[k % own.count])
+            k += 1
+            if !createArmy(for: id, size: size, at: place).success { break }
+        }
+        for i in state.armies.indices where state.armies[i].owner == id {
+            state.armies[i].training = !atWar
+            state.armies[i].stance = atWar ? .balanced : .defend
+            state.armies[i].daysInPlace = 60
+        }
     }
 
     mutating func stopArmy(_ armyID: Int) {
@@ -426,13 +507,13 @@ extension Simulation {
             }
         }
         let a = state.armies[i]
-        let number = state.armies.filter { $0.owner == a.owner }.count + 1
+        let newName = nextArmyName(for: a.owner)
         let newGeneral = makeGeneral(for: a.owner, divisions: half)
-        state.armies.append(Army(id: state.nextArmyID, owner: a.owner, name: "\(number)e armée", province: a.province,
+        state.armies.append(Army(id: state.nextArmyID, owner: a.owner, name: newName, province: a.province,
                                  divisions: half, path: [], progress: 0, organization: a.organization,
                                  daysInPlace: a.daysInPlace, engaged: false, amphibious: false,
                                  general: newGeneral, stance: a.stance,
-                                 planning: a.planning, supply: a.supply))
+                                 supply: a.supply, experience: a.experience, training: a.training))
         state.nextArmyID += 1
         return ActionResult(success: true, message: "Armée divisée en deux.")
     }
@@ -445,16 +526,35 @@ extension Simulation {
         let others = state.armies.filter { $0.owner == main.owner && $0.province == main.province && $0.id != main.id }
         guard !others.isEmpty else { return ActionResult(success: false, message: "Aucune autre armée dans cette région.") }
         var merged = main.divisions
-        var org = main.organization * Double(main.count)
-        for o in others {
-            for (t, n) in o.divisions { merged[t, default: 0] += n }
-            org += o.organization * Double(o.count)
+        var size = main.count
+        guard size < Army.maxDivisions else {
+            return ActionResult(success: false, message: "\(main.name) est déjà au maximum (\(Army.maxDivisions) divisions).")
         }
-        state.armies[i].divisions = merged
-        state.armies[i].organization = org / Double(max(1, merged.values.reduce(0, +)))
-        let ids = Set(others.map { $0.id })
-        state.armies.removeAll { ids.contains($0.id) }
-        return ActionResult(success: true, message: "\(others.count + 1) armées regroupées.")
+        var org = main.organization * Double(main.count)
+        var exp = main.experience * Double(main.count)
+        var absorbed = 0
+        for o in others {
+            guard let j = state.armies.firstIndex(where: { $0.id == o.id }) else { continue }
+            for t in DivisionType.allCases {
+                let room = Army.maxDivisions - size
+                let n = min(room, state.armies[j].divisions[t] ?? 0)
+                guard n > 0 else { continue }
+                merged[t, default: 0] += n
+                state.armies[j].divisions[t] = (state.armies[j].divisions[t] ?? 0) - n
+                org += o.organization * Double(n)
+                exp += o.experience * Double(n)
+                size += n
+            }
+            absorbed += 1
+        }
+        let k = state.armies.firstIndex(where: { $0.id == main.id }) ?? i
+        state.armies[k].divisions = merged
+        state.armies[k].organization = org / Double(max(1, size))
+        state.armies[k].experience = exp / Double(max(1, size))
+        state.armies.removeAll { $0.count == 0 }
+        return ActionResult(success: true, message: size >= Army.maxDivisions
+                            ? "Regroupées : \(main.name) est au complet (\(Army.maxDivisions) divisions)."
+                            : "\(absorbed + 1) armées regroupées (\(size) divisions).")
     }
 
     mutating func dissolveArmy(_ armyID: Int) {
@@ -502,10 +602,6 @@ extension Simulation {
                 if a.supply >= 0.4 && !defending {
                     let regen = 0.03 * (0.5 + 0.5 * readiness) * (a.general.trait == .logistician ? 1.3 : 1) * a.supply
                     a.organization = min(1, a.organization + regen)
-                    if a.supply >= 0.5 {
-                        let speed = (a.general.trait == .planner ? 0.05 : 0.034) * (a.stance == .defend ? 0.5 : 1)
-                        a.planning = min(1, a.planning + speed)
-                    }
                 }
                 state.armies[i] = a
                 continue
@@ -529,7 +625,6 @@ extension Simulation {
                 let days = a.amphibious ? distanceKm(a.province, next) / 400 + 3 : distanceKm(a.province, next) / max(5, speed)
                 a.progress += 1 / max(1, days)
                 a.engaged = false
-                a.planning = max(0, a.planning - 0.04)
                 if a.progress >= 1 {
                     a.province = next
                     a.path.removeFirst()
@@ -597,7 +692,7 @@ extension Simulation {
             let a = state.armies[j]
             if var c = state.countries[a.owner] {
                 for (t, n) in a.divisions { c.divisions[t] = max(0, (c.divisions[t] ?? 0) - n) }
-                let men = Double(a.count) * 10
+                let men = Double(a.count) * 6
                 c.activePersonnel = max(0, c.activePersonnel - men)
                 c.casualties += men
                 state.countries[a.owner] = c
@@ -615,6 +710,8 @@ extension Simulation {
         }
         state.annexedProvinces.remove(target)
         state.provinceOrg[target] = 0.3
+        if let f = state.forts[target] { state.forts[target] = f > 1 ? f - 1 : nil }
+        state.constructions.removeAll { $0.province == target }
         recomputeTerritory(province.country)
         // Les vainqueurs entrent dans la région.
         for i in attackers where state.armies.indices.contains(i) {
@@ -639,9 +736,19 @@ extension Simulation {
     mutating func aiArmies() {
         let atWar = Set(state.wars.filter { $0.isActive }.flatMap { $0.attackers + $0.defenders })
         // Paix : les armées des pays IA rentrent et se dispersent en garnison.
+        // Paix : les armées de l'IA rentrent dans leurs bases et s'y entraînent (elles ne disparaissent plus).
         let idle = Set(state.armies.map { $0.owner }).subtracting(atWar)
         for id in idle where id != state.playerID || state.autoArmies {
-            state.armies.removeAll { $0.owner == id }
+            let own = bases(of: id)
+            for i in state.armies.indices where state.armies[i].owner == id && state.armies[i].path.isEmpty
+                && !state.armies[i].training {
+                if own.contains(state.armies[i].province) || own.isEmpty {
+                    state.armies[i].training = true
+                    state.armies[i].stance = .defend
+                } else {
+                    _ = sendToBase(state.armies[i].id)
+                }
+            }
         }
         for id in atWar.sorted() {
             guard let c = state.countries[id], !c.capitulated else { continue }
@@ -665,7 +772,6 @@ extension Simulation {
         }
         for i in state.armies.indices {
             state.armies[i].daysInPlace = 90
-            state.armies[i].planning = 0.5
         }
     }
 
@@ -680,7 +786,7 @@ extension Simulation {
         var guardCount = 0
         while assigned < target && unassignedCount(id) > 0 && guardCount < 20 {
             guardCount += 1
-            let size = max(1, min(12, max(3, c.divisionCount / 10)))
+            let size = max(1, min(Army.maxDivisions, max(4, c.divisionCount / 8)))
             let place: Int? = front.isEmpty ? deploymentProvince(for: id) : front[k % front.count]
             k += 1
             let result = createArmy(for: id, size: size, at: place)
@@ -759,18 +865,17 @@ extension Simulation {
                 let terrain = TerrainMap.terrain(n)
                 for j in mine where state.armies[j].organization > 0.6 && ProvinceMap.all[state.armies[j].province].neighbors.contains(n) {
                     let b = state.armies[j]
-                    var v = armyAttack(b, vsHardness: 0.2) * (1 + 0.25 * b.planning) * (0.45 + 0.55 * b.supply)
+                    var v = armyAttack(b, vsHardness: 0.2) * (0.45 + 0.55 * b.supply)
                     if TerrainMap.river(b.province, n) { v *= 0.75 }
                     att += v
                     divs += b.count
                 }
                 att *= terrain.attack * weather(at: n).attack
-                att *= min(1, combatWidth(n) * terrain.width / Double(max(1, divs)))
                 let ratio = att / max(def, 0.001)
                 if ratio > (best?.1 ?? 0) { best = (n, ratio) }
             }
             // On attend que l'offensive soit préparée, sauf si l'avantage est écrasant.
-            if let (target, ratio) = best, ratio >= threshold, a.planning >= 0.4 || ratio >= threshold * 1.3 {
+            if let (target, ratio) = best, ratio >= threshold {
                 let stance: ArmyStance = ratio >= threshold * 1.5 ? .assault : .balanced
                 for j in mine where state.armies[j].path.isEmpty && state.armies[j].organization > 0.6
                     && ProvinceMap.all[state.armies[j].province].neighbors.contains(target) {
@@ -838,6 +943,10 @@ extension Simulation {
     func armyStatus(_ a: Army) -> String {
         if a.supply <= 0.15 { return "Encerclée à \(ProvinceMap.all[a.province].name)" }
         if state.battles[a.province] != nil && a.path.isEmpty { return "Défend \(ProvinceMap.all[a.province].name)" }
+        if a.training && a.path.isEmpty {
+            return hasBase(a.province, for: a.owner) ? "Entraînement à la base de \(ProvinceMap.all[a.province].name)"
+                                                     : "Entraînement en campagne à \(ProvinceMap.all[a.province].name)"
+        }
         if let next = a.path.first {
             let nextName = ProvinceMap.all[next].name
             if a.amphibious { return "Débarquement vers \(nextName)" }

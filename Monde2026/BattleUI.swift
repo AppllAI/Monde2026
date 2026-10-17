@@ -20,18 +20,20 @@ struct ArmyCard: View {
             let mine = a.owner == store.playerID
             VStack(alignment: .leading, spacing: 10) {
                 header(sim, a)
-                GeneralRow(general: a.general)
+                if let b = battle(sim, a) {
+                    Button { store.openBattle(b.province) } label: { BattleStrip(battle: b, side: sim.playerSide(in: b)) }
+                        .buttonStyle(.plain)
+                }
                 HStack(spacing: 10) {
                     Gauge2(label: "Moral", value: a.organization, tint: a.organization < 0.4 ? Theme.coral : Theme.teal)
+                    Gauge2(label: "Expérience", value: a.experience, tint: Theme.amber)
                     Gauge2(label: "Ravitaillement", value: a.supply,
                            tint: a.supply <= 0.15 ? Theme.coral : (a.supply < 0.6 ? Theme.amber : Theme.teal))
-                    Gauge2(label: "Plan d'attaque", value: a.planning, tint: Theme.sky)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(sim.armyPower(a))").font(Theme.data(17, weight: .bold)).foregroundStyle(Theme.amber)
-                        Text("Puissance").font(.system(size: 10)).foregroundStyle(Theme.steel)
-                    }
                 }
-                CompositionRow(divisions: a.divisions)
+                HStack {
+                    CompositionRow(divisions: a.divisions)
+                    Spacer(minLength: 0)
+                }
                 if mine {
                     StancePicker(current: a.stance) { stance in
                         let ids = [id] + store.armyGroup.sorted()
@@ -39,67 +41,83 @@ struct ArmyCard: View {
                     }
                     if !store.armyGroup.isEmpty {
                         HStack {
-                            Label("Groupe : \(store.armyGroup.count + 1) armées — les ordres s'appliquent à toutes",
-                                  systemImage: "square.stack.3d.up.fill")
+                            Label("\(store.armyGroup.count + 1) armées ensemble", systemImage: "square.stack.3d.up.fill")
                                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.amber)
                             Spacer()
-                            Button("Défaire") { store.clearGroup() }
+                            Button("Séparer") { store.clearGroup() }
                                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.paper)
                         }
                     }
-                    Text(hint(a)).font(Theme.small).foregroundStyle(Theme.steel).lineLimit(2)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            if let target = a.path.first, sim.state.battles[target] != nil {
-                                QuietButton(title: "Voir la bataille", icon: "flame.fill", tint: Theme.coral) { store.openBattle(target) }
-                            } else if sim.state.battles[a.province] != nil {
-                                QuietButton(title: "Voir la bataille", icon: "flame.fill", tint: Theme.coral) { store.openBattle(a.province) }
-                            }
                             if !a.path.isEmpty {
                                 QuietButton(title: "Arrêter", icon: "stop.fill") {
                                     let ids = [id] + store.armyGroup.sorted()
                                     store.mutate { s in for x in ids { s.stopArmy(x) } }
                                 }
                             }
-                            QuietButton(title: "+ Voisines", icon: "plus.circle") { store.groupNearby() }
+                            QuietButton(title: a.training ? "À l'entraînement" : "Base & entraînement",
+                                        icon: "star.square", tint: a.training ? Theme.amber : Theme.paper) {
+                                if a.training {
+                                    store.mutate { $0.setTraining(false, for: [id]) }
+                                } else {
+                                    store.perform { s, _ in s.sendToBase(id) }
+                                }
+                            }
+                            QuietButton(title: "Armées voisines", icon: "plus.circle") { store.groupNearby() }
                             QuietButton(title: "Tout le front", icon: "rectangle.3.group") { store.groupFront() }
                             QuietButton(title: "Diviser", icon: "square.split.2x1") {
                                 store.perform { s, _ in s.splitArmy(id) }
                             }
                             if sim.playerArmies(in: a.province).count > 1 {
-                                QuietButton(title: "Regrouper ici", icon: "square.stack.3d.up") {
+                                QuietButton(title: "Fusionner ici", icon: "square.stack.3d.up") {
                                     store.perform { s, _ in s.mergeArmies(at: id) }
                                 }
                             }
-                            QuietButton(title: "En garnison", icon: "house", tint: Theme.coral) {
+                            QuietButton(title: "Dissoudre", icon: "xmark.bin", tint: Theme.coral) {
                                 store.mutate { $0.dissolveArmy(id) }
                                 store.clearSelection()
                             }
                         }
                     }
+                    Text(store.waypointMode
+                         ? "Mode étapes : chaque région touchée s'ajoute au trajet."
+                         : "Touchez une région pour y aller. Maintenez ✋ (à gauche) et touchez plusieurs régions pour tracer un détour.")
+                        .font(.system(size: 11)).foregroundStyle(store.waypointMode ? Theme.amber : Theme.steel).lineLimit(2)
+                } else {
+                    GeneralRow(general: a.general)
                 }
             }
             .padding(14)
-            .frame(maxWidth: 640)
+            .frame(maxWidth: 600)
             .glass(24)
         }
     }
 
+    private func battle(_ sim: Simulation, _ a: Army) -> Battle? {
+        if let t = a.path.first, a.engaged, let b = sim.state.battles[t] { return b }
+        return sim.state.battles[a.province]
+    }
+
     private func header(_ sim: Simulation, _ a: Army) -> some View {
         HStack(spacing: 12) {
-            Text(Geo.flag(a.owner)).font(.system(size: 28))
+            UnitSymbol(type: a.mainType, color: Color(uiColor: Theme.politicalColor(a.owner)))
             VStack(alignment: .leading, spacing: 2) {
-                Text(a.name).font(Theme.title(19)).foregroundStyle(Theme.paper)
                 HStack(spacing: 6) {
-                    let t = TerrainMap.terrain(a.province)
-                    Image(systemName: t.icon).font(.system(size: 10))
-                    Text(sim.armyStatus(a)).lineLimit(1)
+                    Text(a.name).font(Theme.title(19)).foregroundStyle(Theme.paper)
+                    Text("\(a.count)/\(Army.maxDivisions)").font(Theme.data(12, weight: .semibold)).foregroundStyle(Theme.steel)
                 }
-                .font(Theme.small)
-                .foregroundStyle(a.engaged || a.supply <= 0.15 ? Theme.coral : Theme.steel)
+                Text(sim.armyStatus(a)).lineLimit(1)
+                    .font(Theme.small)
+                    .foregroundStyle(a.engaged || a.supply <= 0.15 ? Theme.coral : Theme.steel)
             }
             Spacer(minLength: 8)
-            Text("\(a.count) div.").font(Theme.data(14, weight: .semibold)).foregroundStyle(Theme.paper)
+            if a.owner == store.playerID {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(a.general.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.paper).lineLimit(1)
+                    Text(a.general.stars + " " + a.general.trait.name).font(.system(size: 10)).foregroundStyle(Theme.amber).lineLimit(1)
+                }
+            }
             Button { store.clearSelection() } label: {
                 Image(systemName: "xmark").font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Theme.paper)
@@ -110,13 +128,86 @@ struct ArmyCard: View {
             .accessibilityLabel("Désélectionner l'armée")
         }
     }
+}
 
-    private func hint(_ a: Army) -> String {
-        if a.supply <= 0.15 { return "Encerclée : reprenez une région voisine pour rouvrir la route, ou percez vers vos lignes." }
-        if a.path.isEmpty {
-            return "Touchez une région : ami = déplacement, ennemi voisin = attaque, ennemi lointain = offensive région par région (trait rouge)."
+/// Bandeau compact d'une bataille : qui attaque qui, et où en est la prise.
+struct BattleStrip: View {
+    let battle: Battle
+    let side: Int
+
+    var body: some View {
+        let good = side == 1 ? battle.balance > 0.5 : battle.balance < 0.5
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: "flame.fill").foregroundStyle(Theme.coral)
+                Text(side == -1 ? "Défense de \(ProvinceMap.all[battle.province].name)" : "Attaque sur \(ProvinceMap.all[battle.province].name)")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.paper)
+                Spacer()
+                Text("prise \(Int(battle.captureProgress * 100)) %").font(Theme.data(12, weight: .semibold))
+                    .foregroundStyle(good ? Theme.teal : Theme.coral)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.steel)
+            }
+            Meter(value: battle.captureProgress, tint: side == -1 ? Theme.coral : Theme.teal, height: 6)
         }
-        return "Touchez une autre région pour changer d'objectif. Un plan d'attaque complet donne jusqu'à +25 %."
+        .padding(10)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// Symbole d'unité (style OTAN) : croix = infanterie, ovale = blindés, les deux = mécanisée.
+struct UnitSymbol: View {
+    let type: DivisionType
+    var color: Color = Theme.amber
+    var size: CGFloat = 34
+
+    var body: some View {
+        Canvas { ctx, sz in
+            let r = CGRect(x: 1, y: sz.height * 0.15, width: sz.width - 2, height: sz.height * 0.7)
+            ctx.fill(Path(roundedRect: r, cornerRadius: 3), with: .color(color.opacity(0.9)))
+            ctx.stroke(Path(roundedRect: r, cornerRadius: 3), with: .color(.white), lineWidth: 1.5)
+            for p in UnitGlyph.paths(type, in: r) {
+                ctx.stroke(p, with: .color(.white), lineWidth: 1.6)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+enum UnitGlyph {
+    /// Les traits du symbole, dans le rectangle donné.
+    static func paths(_ type: DivisionType, in r: CGRect) -> [Path] {
+        var out: [Path] = []
+        func cross() -> Path {
+            var p = Path()
+            p.move(to: CGPoint(x: r.minX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+            p.move(to: CGPoint(x: r.maxX, y: r.minY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+            return p
+        }
+        func oval() -> Path {
+            Path(roundedRect: r.insetBy(dx: r.width * 0.2, dy: r.height * 0.25), cornerRadius: r.height * 0.25)
+        }
+        switch type {
+        case .infantry: out.append(cross())
+        case .armored: out.append(oval())
+        case .mechanized: out.append(cross()); out.append(oval())
+        case .airborne:
+            out.append(cross())
+            var p = Path()
+            p.addArc(center: CGPoint(x: r.midX - r.width * 0.1, y: r.maxY - r.height * 0.05), radius: r.width * 0.1,
+                     startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+            p.addArc(center: CGPoint(x: r.midX + r.width * 0.1, y: r.maxY - r.height * 0.05), radius: r.width * 0.1,
+                     startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+            out.append(p)
+        case .marines:
+            out.append(cross())
+            var p = Path()
+            p.move(to: CGPoint(x: r.minX + r.width * 0.2, y: r.maxY - r.height * 0.18))
+            p.addCurve(to: CGPoint(x: r.maxX - r.width * 0.2, y: r.maxY - r.height * 0.18),
+                       control1: CGPoint(x: r.midX - r.width * 0.1, y: r.maxY - r.height * 0.45),
+                       control2: CGPoint(x: r.midX + r.width * 0.1, y: r.maxY + r.height * 0.1))
+            out.append(p)
+        }
+        return out
     }
 }
 
@@ -172,7 +263,7 @@ struct CompositionRow: View {
         HStack(spacing: 6) {
             ForEach(DivisionType.allCases.filter { (divisions[$0] ?? 0) > 0 }, id: \.self) { t in
                 HStack(spacing: 4) {
-                    Image(systemName: t.icon).font(.system(size: 10, weight: .semibold))
+                    UnitSymbol(type: t, color: Theme.steel.opacity(0.6), size: 18)
                     Text("\(divisions[t] ?? 0)").font(Theme.data(12, weight: .semibold))
                     Text(t.short).font(.system(size: 10))
                 }
@@ -255,6 +346,7 @@ extension DivisionType {
 struct BattlePanel: View {
     @ObservedObject var store: GameStore
     let province: Int
+    @State private var details = false
 
     var body: some View {
         let _ = store.version
@@ -267,7 +359,10 @@ struct BattlePanel: View {
                             subtitle: TerrainMap.city(province).map { "Autour de \($0)" } ?? p.countryName) { store.panel = nil }
                 HStack(spacing: 8) {
                     Tag(icon: terrain.icon, text: terrain.name)
-                    Tag(icon: weather.icon, text: weather.name, tint: weather == .clear ? Theme.steel : Theme.amber)
+                    if weather != .clear { Tag(icon: weather.icon, text: weather.name, tint: Theme.amber) }
+                    if sim.fortLevel(province) > 0 {
+                        Tag(icon: "building.columns.fill", text: "Fort \(sim.fortLevel(province))", tint: Theme.sky)
+                    }
                     Spacer()
                     SpeedControl(store: store)
                 }
@@ -275,7 +370,7 @@ struct BattlePanel: View {
                     content(sim, b)
                 } else {
                     Dossier(title: "La bataille est terminée") {
-                        Text("Plus aucune armée ne combat pour \(p.name). Elle est tenue par \(sim.name(sim.controller(of: province))).")
+                        Text("\(p.name) est tenue par \(sim.name(sim.controller(of: province))).")
                             .font(Theme.body).foregroundStyle(Theme.paper.opacity(0.85))
                     }
                 }
@@ -286,76 +381,77 @@ struct BattlePanel: View {
     @ViewBuilder
     private func content(_ sim: Simulation, _ b: Battle) -> some View {
         let side = sim.playerSide(in: b)
-        let rivers = sim.state.armies.contains { $0.path.first == province && $0.engaged && TerrainMap.river($0.province, province) }
-        if rivers {
-            Tag(icon: "water.waves", text: "Attaque à travers un fleuve", tint: Theme.sky)
+        // 1. L'essentiel : où en est la prise de la région
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Prise de la région").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
+                Spacer()
+                Text("\(Int(b.captureProgress * 100)) %").font(Theme.data(22, weight: .bold))
+                    .foregroundStyle(side == -1 ? Theme.coral : Theme.teal)
+            }
+            Meter(value: b.captureProgress, tint: side == -1 ? Theme.coral : Theme.teal, height: 12)
+            Text(explanation(b)).font(.system(size: 12)).foregroundStyle(Theme.steel)
         }
-        BalanceBar(battle: b, playerSide: side)
+        .padding(14)
+        .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // 2. Les deux camps face à face
         HStack(alignment: .top, spacing: 10) {
-            SideCard(title: "Attaquant", id: b.attacker, name: sim.name(b.attacker), general: b.attackerGeneral,
-                     divisions: b.attackerDivisions, org: b.attackerOrg, losses: b.attackerLosses, isPlayer: side == 1)
-            SideCard(title: "Défenseur", id: b.defender, name: sim.name(b.defender), general: b.defenderGeneral,
-                     divisions: b.defenderDivisions, org: b.defenderOrg, losses: b.defenderLosses, isPlayer: side == -1)
+            SideCard(title: "Attaque", id: b.attacker, name: sim.name(b.attacker), general: b.attackerGeneral,
+                     divisions: b.attackerDivisions, org: b.attackerOrg, losses: b.attackerLosses,
+                     power: b.attack, isPlayer: side == 1, tactic: b.attackerTactic)
+            SideCard(title: "Défense", id: b.defender, name: sim.name(b.defender), general: b.defenderGeneral,
+                     divisions: b.defenderDivisions, org: b.defenderOrg, losses: b.defenderLosses,
+                     power: b.defense, isPlayer: side == -1, tactic: b.defenderTactic)
         }
-        Dossier(title: "Phase \(b.phase)", subtitle: "Nouvelle phase dans \(b.daysLeftInPhase) j — chaque camp choisit une tactique") {
-            HStack(spacing: 8) {
-                TacticTile(tactic: b.attackerTactic, highlight: b.attackerTactic.beats.contains(b.defenderTactic))
-                Text("contre").font(Theme.small).foregroundStyle(Theme.steel)
-                TacticTile(tactic: b.defenderTactic, highlight: b.defenderTactic.beats.contains(b.attackerTactic))
-            }
-        }
-        if side != 0, let options = playerOptions(sim, b, side: side), !options.isEmpty {
-            Dossier(title: "Votre prochaine tactique",
-                    subtitle: "Choisissez-la, ou laissez faire votre général. L'adversaire voit votre tactique actuelle : changez-en.") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
-                    ForEach(options) { t in
-                        TacticChoice(tactic: t, selected: b.playerPick == t,
-                                     beatsCurrent: t.beats.contains(side == 1 ? b.defenderTactic : b.attackerTactic)) {
-                            store.perform { s, _ in s.pickTactic(t, at: province) }
-                        }
-                    }
-                }
-            }
-        }
+        // 3. Ce que le joueur peut faire
         if side != 0 {
             HStack(spacing: 8) {
-                ActionButton(title: "Frappes aériennes", icon: "airplane", tint: Theme.sky,
+                ActionButton(title: "Frappes", icon: "airplane", tint: Theme.sky,
                              enabled: sim.state.day > b.airStrikeUntil + 10) {
                     store.perform { s, _ in s.callAirStrike(at: province) }
                 }
                 ActionButton(title: "Renforts", icon: "plus.circle.fill", tint: Theme.teal) {
                     store.perform { s, _ in s.reinforceBattle(at: province) }
                 }
-                ActionButton(title: side == 1 ? "Arrêter" : "Se replier", icon: "arrow.uturn.backward", tint: Theme.coral) {
+                ActionButton(title: side == 1 ? "Stopper" : "Se replier", icon: "arrow.uturn.backward", tint: Theme.coral) {
                     store.perform { s, _ in s.retreatFromBattle(at: province) }
                 }
             }
         }
-        HStack(alignment: .top, spacing: 10) {
-            ModifierList(title: "Attaque", mods: b.attackMods)
-            ModifierList(title: "Défense", mods: b.defenseMods)
+        // 4. Le détail, pour qui veut comprendre
+        Button { withAnimation(.snappy) { details.toggle() } } label: {
+            HStack {
+                Text("Pourquoi ce rapport de force ?").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Image(systemName: details ? "chevron.up" : "chevron.down")
+            }
+            .foregroundStyle(Theme.paper)
+            .padding(12)
+            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        if !b.log.isEmpty {
-            Dossier(title: "Journal") {
-                ForEach(Array(b.log.reversed().enumerated()), id: \.offset) { _, line in
-                    Text(line).font(Theme.small).foregroundStyle(Theme.paper.opacity(0.85))
+        .buttonStyle(.plain)
+        if details {
+            HStack(alignment: .top, spacing: 10) {
+                ModifierList(title: "Attaque", mods: b.attackMods)
+                ModifierList(title: "Défense", mods: b.defenseMods)
+            }
+            if !b.log.isEmpty {
+                Dossier(title: "Journal") {
+                    ForEach(Array(b.log.reversed().enumerated()), id: \.offset) { _, line in
+                        Text(line).font(Theme.small).foregroundStyle(Theme.paper.opacity(0.85))
+                    }
                 }
             }
         }
     }
 
-    private func playerOptions(_ sim: Simulation, _ b: Battle, side: Int) -> [Tactic]? {
-        guard let p = sim.state.playerID else { return nil }
-        if side == 1 {
-            let mine = sim.state.armies.filter { $0.owner == p && $0.path.first == province && $0.engaged }
-            guard !mine.isEmpty, b.attacker == p else { return nil }
-            let all = sim.state.armies.filter { $0.path.first == province && $0.engaged }
-            return sim.availableTactics(attacking: true, armies: all, owner: p, province: province,
-                                        fronts: Set(all.map { $0.province }).count)
+    private func explanation(_ b: Battle) -> String {
+        let ratio = b.attack / max(b.defense, 0.001)
+        let r = String(format: "%.1f", ratio).replacingOccurrences(of: ".", with: ",")
+        if b.balance > 0.5 {
+            return "L'attaque est \(r) fois plus forte : le moral des défenseurs s'effondre. La région tombe quand il passe sous 20 %."
         }
-        guard b.defender == p else { return nil }
-        let mine = sim.state.armies.filter { $0.owner == p && $0.province == province }
-        return sim.availableTactics(attacking: false, armies: mine, owner: p, province: province, fronts: 1)
+        return "La défense tient (attaque \(r) fois sa force) : les attaquants s'usent. Ils renoncent quand leur moral passe sous 25 %."
     }
 }
 
@@ -430,7 +526,9 @@ struct SideCard: View {
     let divisions: Int
     let org: Double
     let losses: Double
+    let power: Double
     let isPlayer: Bool
+    let tactic: Tactic
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -442,17 +540,19 @@ struct SideCard: View {
                         .lineLimit(1)
                 }
             }
-            Text(general).font(.system(size: 11)).foregroundStyle(Theme.steel).lineLimit(1)
             HStack {
                 Readout(label: "Divisions", value: divisions > 0 ? "\(divisions)" : "garnison")
+                Spacer()
+                Readout(label: "Force", value: Fmt.number(power))
                 Spacer()
                 Readout(label: "Pertes", value: "\(Int(losses)) k", tint: Theme.coral)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Meter(value: org, tint: org < 0.3 ? Theme.coral : Theme.teal, height: 6)
-                Text("Moral \(Fmt.pct(org, 0))\(org < 0.3 ? " — sur le point de céder" : "")")
-                    .font(.system(size: 10)).foregroundStyle(org < 0.3 ? Theme.coral : Theme.steel)
+                Text("Moral \(Fmt.pct(org, 0))").font(.system(size: 10)).foregroundStyle(org < 0.3 ? Theme.coral : Theme.steel)
             }
+            Label(tactic.name, systemImage: tactic.icon).font(.system(size: 11)).foregroundStyle(Theme.steel).lineLimit(1)
+            Text(general).font(.system(size: 10)).foregroundStyle(Theme.steel.opacity(0.8)).lineLimit(1)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
