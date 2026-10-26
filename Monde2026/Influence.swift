@@ -56,7 +56,8 @@ extension Simulation {
             if r > 50 { changeRelation(p, other, by: 2) }
             if enemies(of: target).contains(other) { changeRelation(p, other, by: -4) }
         }
-        state.countries[p]?.influence = min(100, (state.countries[p]?.influence ?? 0) + 2)
+        let influence = min(100, (state.countries[p]?.influence ?? 0) + 2)
+        state.countries[p]?.influence = influence
         return ActionResult(success: true, message: "Aide humanitaire de \(Int(amount)) Md$ à \(name(target)) : la population vous en sait gré.")
     }
 
