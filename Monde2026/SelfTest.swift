@@ -73,7 +73,9 @@ enum SelfTest {
         var prof = probe
         var times: [String: Double] = [:]
         let tp = Date()
+        prof.relCache.profiling = true
         for _ in 0..<90 { prof.advanceDayProfiled(&times) }
+        for (k, v) in prof.relCache.timings { times[k] = v }
         let total = Date().timeIntervalSince(tp)
         log("profil 90 j : \(String(format: "%.1f", total * 1000 / 90)) ms/jour — " + times.sorted { $0.value > $1.value }
             .map { "\($0.key) \(String(format: "%.2f", $0.value * 1000 / 90))" }.joined(separator: ", "))

@@ -948,20 +948,22 @@ extension Simulation {
     // MARK: - IA diplomatique (chaque mois)
 
     mutating func monthlyDiplomacy() {
-        driftRelations()
+        timed("d.relations") { $0.driftRelations() }
         for id in countryIDs {
             guard let c = state.countries[id] else { continue }
             let gain = 1 + log10(max(c.gdp, 1)) / 2
             state.countries[id]?.influence = min(100, c.influence + gain)
         }
         updateWarMomentum()
-        aiPeace()
-        aiMilitaryAid()
-        aiWarPlans()
-        aiAgreements()
-        aiFactions()
-        aiProposalsToPlayer()
-        aiJointProposals()
+        timed("d.paix") { $0.aiPeace() }
+        timed("d.aide") { $0.aiMilitaryAid() }
+        timed("d.plans") { $0.aiWarPlans() }
+        timed("d.accords") { $0.aiAgreements() }
+        timed("d.factions") { $0.aiFactions() }
+        timed("d.joueur") { sim in
+            sim.aiProposalsToPlayer()
+            sim.aiJointProposals()
+        }
         let today = state.day
         state.proposals.removeAll { today - $0.day > 60 }
         state.worldTension = (state.worldTension * 0.97 + Double(activeWarsList.count) * 0.8).clamped(0, 100)

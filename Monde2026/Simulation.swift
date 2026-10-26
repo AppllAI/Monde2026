@@ -95,6 +95,9 @@ final class RelationCache: @unchecked Sendable {
     private var controlled: [CountryID: [Int]] = [:]
     private var troopsKey = -1
     private var troops: [Int: Int] = [:]
+    /// Mesure fine (autotest de performance seulement).
+    var profiling = false
+    var timings: [String: Double] = [:]
 
     func reset() {
         lock.lock()
@@ -153,6 +156,14 @@ struct Simulation {
     var state: GameState
     /// Chaque calcul de jours a sa propre mémoire (jamais partagée entre deux fils d'exécution).
     var relCache = RelationCache()
+
+    /// Mesure le temps d'une étape quand l'autotest le demande (sinon, simple appel).
+    mutating func timed(_ name: String, _ body: (inout Simulation) -> Void) {
+        guard relCache.profiling else { body(&self); return }
+        let t0 = Date()
+        body(&self)
+        relCache.timings[name, default: 0] += Date().timeIntervalSince(t0)
+    }
 
     /// Empreinte de ce qui décide des camps.
     func relationKey() -> [Int] {
