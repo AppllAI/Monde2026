@@ -574,6 +574,13 @@ final class ProvinceRenderer: MKOverlayRenderer {
                 context.strokePath()
             }
         }
+        // Côtes : un trait sombre tracé AVANT le remplissage ; les régions recouvrent la moitié intérieure,
+        // il ne reste qu'un liseré net le long de la mer (et rien entre deux régions voisines).
+        context.setStrokeColor(ProvinceRenderer.coast.cgColor)
+        context.setLineWidth(1.8 * px)
+        context.setLineJoin(.round)
+        for i in visible where provinces[i].coastal { context.addPath(shape(i)) }
+        context.strokePath()
         context.setAlpha(fillAlpha)
         context.beginTransparencyLayer(auxiliaryInfo: nil)
         // 1. Remplissage des régions
@@ -608,12 +615,6 @@ final class ProvinceRenderer: MKOverlayRenderer {
         context.endTransparencyLayer()
         context.setAlpha(1)
 
-        // Côtes : un trait sombre autour de chaque région (les frontières sont redessinées par-dessus).
-        context.setStrokeColor(ProvinceRenderer.coast.cgColor)
-        context.setLineWidth(0.9 * px)
-        context.setLineJoin(.round)
-        for i in visible where provinces[i].coastal { context.addPath(shape(i)) }
-        context.strokePath()
 
         // 2. Frontières
         context.setLineJoin(.round)
