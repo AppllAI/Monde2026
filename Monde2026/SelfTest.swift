@@ -96,6 +96,16 @@ enum SelfTest {
             log("flèche : " + front.arrowOffensive([a.id], along: [a.province, target]).message)
         }
 
+        // Modèles de division : le modèle « Choc » doit renforcer l'attaque, au prix d'un coût plus élevé.
+        if let a = front.armies(of: "UKR").first {
+            let before = front.armyAttack(a, vsHardness: 0.2)
+            for t in DivisionType.allCases {
+                _ = front.setTemplate(DivisionTemplate(supports: TemplatePreset.assault.supports), for: t, owner: "UKR")
+            }
+            let after = front.armyAttack(a, vsHardness: 0.2)
+            log("modèles : attaque \(Int(before)) → \(Int(after)) avec le modèle Choc, coût +\(Int(front.template("UKR", .infantry).effect.cost * 100)) %")
+        }
+
         let watched: [CountryID] = ["USA", "CHN", "FRA", "DEU", "RUS", "UKR", "IND", "BRA", "ARM", "SDN"]
         for year in 1...5 {
             let t = Date()

@@ -78,7 +78,8 @@ struct GameState: Codable {
     var nextPlanID = 1
     var fronts: [FrontOrder] = []                       // groupes d'armées affectés à une ligne de front
     var nextFrontID = 1
-    var summits: [String: Int] = [:]                    // dernier sommet entre deux pays (jour)
+    var summits: [String: Int] = [:]
+    var templates: [CountryID: [DivisionType: DivisionTemplate]] = [:]   // modèles de division (soutiens)                    // dernier sommet entre deux pays (jour)
     var reports: [BattleReport] = []                    // rapports après bataille (les plus récents)
     var nextReportID = 1
 }
@@ -528,10 +529,12 @@ struct Simulation {
     @discardableResult
     mutating func recruit(_ type: DivisionType, count: Int, for id: CountryID, base: Int? = nil) -> Bool {
         guard count > 0, var c = state.countries[id] else { return false }
-        let men = Double(count) * type.stats.manpower
+        // Un modèle de division plus riche demande plus d'hommes et plus de temps.
+        let extra = 1 + template(id, type).effect.cost
+        let men = Double(count) * type.stats.manpower * extra
         guard men <= c.availableManpower else { return false }
         c.activePersonnel += men
-        let days = Int(Double(type.trainingDays) * (state.industryCache[id]?.training ?? 1))
+        let days = Int(Double(type.trainingDays) * (state.industryCache[id]?.training ?? 1) * extra)
         c.startTraining(type, count: count, days: max(10, days))
         if let b = base { c.training[c.training.count - 1].base = b }
         state.countries[id] = c

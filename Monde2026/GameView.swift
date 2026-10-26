@@ -444,6 +444,7 @@ struct PanelHost: View {
                 case .army(let id): ArmyOrganizer(store: store, armyID: id)
                 case .diplo(let c, let a): DiploActionPanel(store: store, target: c, action: a)
                 case .report(let id): BattleReportPanel(store: store, reportID: id)
+                case .templates: TemplatesPanel(store: store)
                 }
                 }
                 .id(panel)

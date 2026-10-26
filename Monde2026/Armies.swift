@@ -221,10 +221,13 @@ extension Simulation {
     func armyAttack(_ a: Army, vsHardness h: Double) -> Double {
         guard let c = state.countries[a.owner] else { return 0 }
         var total = 0.0
+        let templates = state.templates[a.owner]
         for (t, n) in a.divisions {
             let s = t.stats
+            let e = templates?[t]?.effect ?? SupportEffect()
             let armor = c.has(.nextGenArmor) && (t == .armored || t == .mechanized) ? 1.12 : 1.0
-            total += Double(n) * (s.softAttack * (1 - h) + s.hardAttack * h + s.breakthrough * 0.5) * armor
+            total += Double(n) * (s.softAttack * (1 + e.soft) * (1 - h) + s.hardAttack * (1 + e.hard) * h
+                                  + s.breakthrough * (1 + e.breakthrough) * 0.5) * armor
         }
         return (total * c.combatMultiplier + droneSupport(c, armyCount: a.count)) * c.posture.attack * (0.3 + 0.7 * a.organization)
             * (0.8 + 0.4 * a.experience) * (state.industryCache[a.owner]?.arms ?? 1)
@@ -233,9 +236,12 @@ extension Simulation {
     func armyDefense(_ a: Army, vsHardness h: Double) -> Double {
         guard let c = state.countries[a.owner] else { return 0 }
         var total = 0.0
+        let templates = state.templates[a.owner]
         for (t, n) in a.divisions {
             let s = t.stats
-            total += Double(n) * (s.defense + 0.3 * (s.softAttack * (1 - h) + s.hardAttack * h))
+            let e = templates?[t]?.effect ?? SupportEffect()
+            total += Double(n) * (s.defense * (1 + e.defense)
+                                  + 0.3 * (s.softAttack * (1 + e.soft) * (1 - h) + s.hardAttack * (1 + e.hard) * h))
         }
         // Retranchement progressif : jusqu'à +50 % après un mois sur place.
         let entrenched = 1 + min(0.5, Double(a.daysInPlace) / 60)
@@ -686,7 +692,9 @@ extension Simulation {
             } else if holder == a.owner || holder == a.side || isFriendly(a.side, holder) || isFriendly(a.owner, holder) {
                 var speed = (a.isMotorized ? 45.0 : 30.0) * (0.6 + 0.4 * (state.countries[a.owner]?.infrastructure ?? 0.5))
                 speed *= TerrainMap.terrain(next).movement * weather(at: next).movement
-                if a.supply < 0.4 { speed *= 0.7 }
+                let doctrine = armyEffect(a)
+                speed *= 1 + doctrine.speed
+                if a.supply < 0.4 { speed *= 0.7 + 0.3 * doctrine.supply }
                 let days = a.amphibious ? distanceKm(a.province, next) / 400 + 3 : distanceKm(a.province, next) / max(5, speed)
                 a.progress += 1 / max(1, days)
                 a.engaged = false
@@ -729,7 +737,8 @@ extension Simulation {
         let a = state.armies[index]
         guard var c = state.countries[a.owner] else { return }
         let share = Double(a.count) / Double(max(1, c.divisionCount))
-        c.applyLandLosses(fraction: intensity * c.posture.losses, share: share)
+        let medics = 1 + armyEffect(a).losses
+        c.applyLandLosses(fraction: intensity * c.posture.losses * medics, share: share)
         state.countries[a.owner] = c
     }
 

@@ -201,7 +201,7 @@ enum GameSection: CaseIterable {
     var tabs: [(String, Panel)] {
         switch self {
         case .economy: return [("Économie", .economy), ("Industrie", .production), ("Recherche", .research), ("Projets", .projects)]
-        case .military: return [("Armée", .military)]
+        case .military: return [("Armée", .military), ("Divisions", .templates)]
         case .diplomacy: return [("Diplomatie", .diplomacy), ("Monde", .world)]
         case .politics: return [("Politique", .politics)]
         }

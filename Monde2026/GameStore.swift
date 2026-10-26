@@ -15,6 +15,7 @@ enum Panel: Identifiable, Hashable {
     case army(Int)
     case diplo(CountryID, DiploAction)
     case report(Int)
+    case templates
 
     var id: String {
         switch self {
@@ -33,6 +34,7 @@ enum Panel: Identifiable, Hashable {
         case .army(let a): return "army-\(a)"
         case .diplo(let c, let a): return "diplo-\(c)-\(a.rawValue)"
         case .report(let r): return "report-\(r)"
+        case .templates: return "templates"
         }
     }
 

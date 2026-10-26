@@ -687,6 +687,9 @@ extension Simulation {
             stanceSum += v * a.stance.attack
             var t = terrain.attack * (1 + armorShare * (terrain.armor - 1))
             if a.general.trait == .mountaineer { t = 1 - (1 - t) * 0.5 }
+            // Le génie (modèle de division) réduit la gêne du terrain.
+            let engineers = armyEffect(a).terrain
+            t = 1 - (1 - t) * (1 - engineers * 0.5)
             terrainSum += v * t
         }
         let base = max(attack, 0.001)
@@ -698,7 +701,11 @@ extension Simulation {
         addA("Généraux", generalSum / base)
         addA("Posture", stanceSum / base)
         if fronts >= 2 { addA("Attaque de \(fronts) côtés", min(1.25, 1 + 0.08 * Double(fronts - 1))) }
-        let air = airSuperiority(leadOwner, defenderCountry)
+        var air = airSuperiority(leadOwner, defenderCountry)
+        // La défense aérienne des divisions rapproche le rapport de forces aérien de l'équilibre.
+        let attCover = attArmies.isEmpty ? 0 : attArmies.reduce(0.0) { $0 + armyEffect($1).airCover } / Double(attArmies.count)
+        let defCover = defArmies.isEmpty ? 0 : defArmies.reduce(0.0) { $0 + armyEffect($1).airCover } / Double(defArmies.count)
+        if air > 0.5 { air = 0.5 + (air - 0.5) * (1 - defCover) } else { air = 0.5 - (0.5 - air) * (1 - attCover) }
         addA("Maîtrise du ciel", 1 + 0.2 * (air - 0.5))
         if battle.airStrikeSide == leadOwner && today <= battle.airStrikeUntil { addA("Frappes aériennes", 1.15) }
         var attTac = tacticValue(attTactic, armies: attArmies, owner: leadOwner, province: target)
