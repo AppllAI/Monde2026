@@ -30,6 +30,8 @@ struct UnitToken: Equatable, Identifiable {
     let training: Bool
     let serving: Bool
     let onBorder: Bool
+    var org: Double = 1          // moral (arrondi au dixième)
+    var rank: Int = 0            // galons d'expérience (0…3)
 
     static func == (l: UnitToken, r: UnitToken) -> Bool {
         l.point.x == r.point.x && l.point.y == r.point.y && l.looksSame(as: r)
@@ -39,7 +41,7 @@ struct UnitToken: Equatable, Identifiable {
     func looksSame(as r: UnitToken) -> Bool {
         id == r.id && count == r.count && selected == r.selected && engaged == r.engaged && moving == r.moving
             && training == r.training && mainType == r.mainType && serving == r.serving && onBorder == r.onBorder
-            && mix == r.mix && isPlayer == r.isPlayer
+            && mix == r.mix && isPlayer == r.isPlayer && org == r.org && rank == r.rank
     }
 }
 
@@ -171,7 +173,9 @@ enum UnitsBuilder {
                                          mix: DivisionType.allCases.map { (Double(a.divisions[$0] ?? 0) / total * 20).rounded() / 20 },
                                          isPlayer: a.owner == player, selected: selected, engaged: a.engaged,
                                          moving: !a.path.isEmpty && !a.engaged, training: a.training && a.path.isEmpty,
-                                         serving: a.servingFor != nil, onBorder: a.facing != nil && a.path.isEmpty))
+                                         serving: a.servingFor != nil, onBorder: a.facing != nil && a.path.isEmpty,
+                                         org: (a.organization * 10).rounded() / 10,
+                                         rank: a.experience < 0.35 ? 0 : (a.experience < 0.55 ? 1 : (a.experience < 0.75 ? 2 : 3))))
             if a.owner == player && !a.path.isEmpty {
                 var pts = [point]
                 var hostile: Int?

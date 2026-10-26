@@ -20,26 +20,31 @@ struct TopBar: View {
 
     var body: some View {
         if let sim = store.sim, let player = store.player {
+            let atWar = sim.isAtWar(player.id)
             HStack(spacing: 12) {
                 Button { store.open(.country(player.id)) } label: {
                     HStack(spacing: 10) {
-                        FlagBadge(id: player.id, size: 28)
+                        FlagBadge(id: player.id, size: 26)
+                            .frame(width: 42, height: 42)
+                            .background(HUDShape(cut: 8).fill(Theme.raised))
+                            .overlay(HUDShape(cut: 8).strokeBorder(Theme.amber.opacity(0.7), lineWidth: 1.2))
                         VStack(alignment: .leading, spacing: 0) {
-                            Text(player.name).font(Theme.title(17)).foregroundStyle(Theme.paper).lineLimit(1)
-                            Text(sim.dateString).font(Theme.data(12)).foregroundStyle(Theme.steel)
+                            Text(player.name.uppercased()).font(Theme.title(17)).tracking(0.6).foregroundStyle(Theme.paper).lineLimit(1)
+                            Text(sim.dateString).font(Theme.data(12, weight: .semibold)).foregroundStyle(Theme.amber)
                         }
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(Pressable())
                 if wide {
-                    Divider().frame(height: 26).overlay(Theme.line)
-                    MiniStat(icon: "banknote", value: Fmt.money(sim.effectiveGDP(player.id)),
-                             tint: player.growth >= 0 ? Theme.paper : Theme.coral)
-                    MiniStat(icon: "person.3.fill", value: Fmt.pct(player.stability, 0),
-                             tint: player.stability < 0.35 ? Theme.coral : Theme.paper)
-                    MiniStat(icon: "shield.lefthalf.filled", value: "\(player.divisionCount)", tint: Theme.paper)
-                    if sim.isAtWar(player.id) {
-                        MiniStat(icon: "flame.fill", value: "En guerre", tint: Theme.coral)
+                    Rectangle().fill(Theme.edge).frame(width: 1, height: 30)
+                    ResourceChip(icon: "banknote.fill", value: Fmt.money(sim.effectiveGDP(player.id)), label: "PIB",
+                                 tint: Theme.amber, warn: player.growth < 0)
+                    ResourceChip(icon: "person.3.fill", value: Fmt.pct(player.stability, 0), label: "Stabilité",
+                                 tint: Theme.teal, warn: player.stability < 0.35)
+                    ResourceChip(icon: "shield.lefthalf.filled", value: "\(player.divisionCount)", label: "Divisions", tint: Theme.sky)
+                    ResourceChip(icon: "sparkles", value: "\(Int(player.influence))", label: "Influence", tint: Theme.violet)
+                    if atWar {
+                        ResourceChip(icon: "flame.fill", value: "Guerre", label: "État", tint: Theme.coral, warn: true)
                     }
                 }
                 Spacer(minLength: 4)
@@ -48,19 +53,20 @@ struct TopBar: View {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { store.mapTray.toggle() }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: store.mapMode.icon).font(.system(size: 13, weight: .semibold))
-                        if wide { Text("Carte").font(.system(size: 13, weight: .semibold)) }
+                        Image(systemName: store.mapMode.icon).font(.system(size: 13, weight: .bold))
+                        if wide { Text("CARTE").font(Theme.label(13)).tracking(0.8) }
                     }
                     .foregroundStyle(store.mapTray ? Theme.ink : Theme.paper)
-                    .padding(.horizontal, 12).frame(height: 34)
-                    .background(store.mapTray ? Theme.amber : Color.white.opacity(0.07), in: Capsule())
+                    .padding(.horizontal, 12).frame(height: 36)
+                    .background(HUDShape(cut: 7, radius: 2).fill(store.mapTray ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Color.white.opacity(0.07))))
+                    .overlay(HUDShape(cut: 7, radius: 2).strokeBorder(Color.white.opacity(0.14)))
                 }
                 .buttonStyle(Pressable())
                 .accessibilityLabel("Changer de carte")
                 GameMenu(store: store)
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .glass(22)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .hudPanel(16, tint: atWar ? Theme.coral : Theme.sky)
         }
     }
 }
@@ -90,10 +96,8 @@ struct MapControls: View {
                 if !battles.isEmpty {
                     Button { store.openBattle(battles[0].province) } label: {
                         ZStack(alignment: .topTrailing) {
-                            Image(systemName: "flame.fill").font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Theme.coral)
-                                .frame(width: 48, height: 48)
-                                .glass(24)
+                            IconTile(icon: "flame.fill", tint: Theme.coral, size: 50)
+                                .background(HUDShape(cut: 11).fill(Theme.ink.opacity(0.85)))
                             Text("\(battles.count)").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.ink)
                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                 .background(Theme.coral, in: Capsule())
@@ -115,10 +119,8 @@ struct MapControls: View {
 
     private func round(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.paper)
-                .frame(width: 48, height: 48)
-                .glass(24)
+            IconTile(icon: icon, tint: Theme.sky, size: 50)
+                .background(HUDShape(cut: 11).fill(Theme.ink.opacity(0.85)))
         }
         .buttonStyle(Pressable())
         .accessibilityLabel(label)
@@ -180,8 +182,18 @@ enum GameSection: CaseIterable {
         switch self {
         case .economy: return "chart.bar.xaxis"
         case .military: return "shield.lefthalf.filled"
-        case .diplomacy: return "globe.europe.africa"
-        case .politics: return "building.columns"
+        case .diplomacy: return "globe.europe.africa.fill"
+        case .politics: return "building.columns.fill"
+        }
+    }
+
+    /// Couleur propre à chaque section (on la reconnaît d'un coup d'œil).
+    var tint: Color {
+        switch self {
+        case .economy: return Theme.amber
+        case .military: return Theme.coral
+        case .diplomacy: return Theme.sky
+        case .politics: return Theme.violet
         }
     }
 
@@ -204,34 +216,39 @@ struct SectionDock: View {
     @ObservedObject var store: GameStore
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             ForEach(GameSection.allCases, id: \.self) { section in
                 Button {
                     if let current = store.panel, GameSection.of(current) == section { store.panel = nil } else { store.open(section.tabs[0].1) }
                 } label: {
-                    HStack(spacing: 8) {
+                    let open = isOpen(section)
+                    HStack(spacing: 9) {
                         ZStack(alignment: .topTrailing) {
-                            Image(systemName: section.icon).font(.system(size: 17, weight: .medium))
+                            IconTile(icon: section.icon, tint: section.tint, size: 32, filled: open)
                             if section == .diplomacy && inboxCount > 0 {
-                                Circle().fill(Theme.amber).frame(width: 8, height: 8).offset(x: 4, y: -3)
+                                Text("\(inboxCount)").font(.system(size: 9, weight: .heavy)).foregroundStyle(Theme.ink)
+                                    .padding(.horizontal, 4).padding(.vertical, 1)
+                                    .background(Theme.amber, in: Capsule()).offset(x: 6, y: -5)
                             }
                             if section == .military && atWar {
-                                Circle().fill(Theme.coral).frame(width: 8, height: 8).offset(x: 4, y: -3)
+                                Circle().fill(Theme.coral).frame(width: 9, height: 9)
+                                    .overlay(Circle().stroke(Theme.ink, lineWidth: 1.5)).offset(x: 4, y: -4)
                             }
                         }
-                        Text(section.title).font(.system(size: 13, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(section.title.uppercased()).font(Theme.label(13)).tracking(0.8).lineLimit(1).minimumScaleFactor(0.7)
                     }
-                    .foregroundStyle(isOpen(section) ? Theme.ink : Theme.paper)
-                    .frame(maxWidth: .infinity, minHeight: 46)
-                    .background(isOpen(section) ? Theme.amber : Color.clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .foregroundStyle(open ? Theme.paper : Theme.paper.opacity(0.85))
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(HUDShape(cut: 9).fill(open ? AnyShapeStyle(section.tint.opacity(0.18)) : AnyShapeStyle(Color.clear)))
+                    .overlay(HUDShape(cut: 9).strokeBorder(open ? section.tint.opacity(0.6) : Color.clear, lineWidth: 1))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(Pressable())
             }
         }
-        .padding(4)
-        .glass(26)
-        .frame(maxWidth: 640)
+        .padding(5)
+        .hudPanel(14)
+        .frame(maxWidth: 680)
     }
 
     private func isOpen(_ section: GameSection) -> Bool {
@@ -260,16 +277,17 @@ struct SectionTabs: View {
             HStack(spacing: 4) {
                 ForEach(section.tabs, id: \.0) { tab in
                     Button { withAnimation(.snappy) { store.panel = tab.1 } } label: {
-                        Text(tab.0).font(.system(size: 13, weight: .semibold))
+                        Text(tab.0.uppercased()).font(Theme.label(12.5)).tracking(0.8)
                             .frame(maxWidth: .infinity).padding(.vertical, 9)
                             .foregroundStyle(panel == tab.1 ? Theme.ink : Theme.paper)
-                            .background(panel == tab.1 ? Theme.paper : Color.clear, in: Capsule())
+                            .background(HUDShape(cut: 6, radius: 2).fill(panel == tab.1 ? AnyShapeStyle(section.tint) : AnyShapeStyle(Color.clear)))
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(4)
-            .background(Color.white.opacity(0.06), in: Capsule())
+            .background(HUDShape(cut: 8).fill(Color.white.opacity(0.05)))
+            .overlay(HUDShape(cut: 8).strokeBorder(Color.white.opacity(0.08)))
         }
     }
 }
@@ -506,7 +524,7 @@ struct RegionDetail: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.white.opacity(0.05), in: HUDShape(cut: 7))
     }
 
     @ViewBuilder
@@ -530,7 +548,7 @@ struct RegionDetail: View {
                 }
                 .foregroundStyle(Theme.ink)
                 .padding(12)
-                .background(Theme.amber, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Theme.amber, in: HUDShape(cut: 7))
             }
             .buttonStyle(.plain)
         } else if kind == .fort || !sim.state.bases.contains(province) {
@@ -643,7 +661,7 @@ struct MapTray: View {
                                 .foregroundStyle(on ? Theme.ink : Theme.paper)
                                 .frame(width: 96, height: 62)
                                 .background(on ? Theme.amber : Color.white.opacity(0.06),
-                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                            in: HUDShape(cut: 8))
                             }
                             .buttonStyle(Pressable())
                             .id(mode)

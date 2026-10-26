@@ -10,21 +10,26 @@ import UIKit
 // =============================================================
 
 enum Theme {
-    static let ink = Color(red: 0.043, green: 0.086, blue: 0.133)        // #0B1622
-    static let deep = Color(red: 0.067, green: 0.125, blue: 0.188)       // #112030
-    static let steel = Color(red: 0.56, green: 0.64, blue: 0.72)         // #8FA3B8
-    static let paper = Color(red: 0.93, green: 0.94, blue: 0.95)
-    static let amber = Color(red: 0.95, green: 0.71, blue: 0.27)         // #F2B544 — le joueur
-    static let coral = Color(red: 0.90, green: 0.33, blue: 0.29)         // #E5534B — la guerre
-    static let teal = Color(red: 0.23, green: 0.72, blue: 0.65)          // #3BB8A6 — les alliés
-    static let sky = Color(red: 0.42, green: 0.66, blue: 0.95)
+    // Identité « centre de commandement » : fonds bleu nuit profonds, accents vifs et lisibles.
+    static let ink = Color(red: 0.035, green: 0.055, blue: 0.09)        // #090E17 — fond
+    static let deep = Color(red: 0.075, green: 0.11, blue: 0.165)       // #131C2A — panneaux
+    static let raised = Color(red: 0.11, green: 0.155, blue: 0.225)     // #1C283A — cartes en relief
+    static let steel = Color(red: 0.55, green: 0.63, blue: 0.72)        // texte secondaire
+    static let paper = Color(red: 0.94, green: 0.96, blue: 0.98)        // texte
+    static let amber = Color(red: 1.0, green: 0.71, blue: 0.28)         // #FFB547 — le joueur
+    static let coral = Color(red: 1.0, green: 0.35, blue: 0.31)         // #FF5A4F — la guerre
+    static let teal = Color(red: 0.19, green: 0.84, blue: 0.65)         // #30D6A6 — les alliés
+    static let sky = Color(red: 0.31, green: 0.70, blue: 1.0)           // #4FB3FF — information
+    static let violet = Color(red: 0.62, green: 0.48, blue: 1.0)        // recherche, espionnage
 
     static let line = Color.white.opacity(0.10)
+    static let edge = Color(red: 0.45, green: 0.70, blue: 1.0).opacity(0.22)   // liseré des panneaux
 
-    // Typographie
-    static func title(_ size: CGFloat) -> Font { .system(size: size, weight: .semibold, design: .serif) }
+    // Typographie : titres en capitales étroites et grasses (style jeu de stratégie), chiffres à chasse fixe.
+    static func title(_ size: CGFloat) -> Font { .system(size: size, weight: .heavy).width(.condensed) }
+    static func label(_ size: CGFloat = 11) -> Font { .system(size: size, weight: .bold).width(.condensed) }
     static func data(_ size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        .system(size: size, weight: weight, design: .default).monospacedDigit()
+        .system(size: size, weight: weight, design: .rounded).monospacedDigit()
     }
     static let body = Font.system(size: 15)
     static let small = Font.system(size: 12)

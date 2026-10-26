@@ -609,7 +609,7 @@ final class UnitLayerView: UIView, UIGestureRecognizerDelegate {
 // MARK: - Le pion
 
 final class UnitTokenView: UIView {
-    static let size = CGSize(width: 88, height: 32)
+    static let size = CGSize(width: 92, height: 34)
 
     var token: UnitToken { didSet { setNeedsDisplay(); updatePulse() } }
     var position: MKMapPoint = MKMapPoint(x: 0, y: 0)
@@ -626,7 +626,7 @@ final class UnitTokenView: UIView {
         layer.shadowRadius = 4
         layer.shadowOffset = CGSize(width: 0, height: 2)
         // Ombre à forme fixe : bien moins coûteuse à afficher qu'une ombre calculée à chaque image.
-        layer.shadowPath = UIBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), cornerRadius: 14.5).cgPath
+        layer.shadowPath = UnitTokenView.plate(bounds.insetBy(dx: 1.5, dy: 1.5)).cgPath
         updatePulse()
     }
 
@@ -654,63 +654,110 @@ final class UnitTokenView: UIView {
         }
     }
 
+    /// Contour de la plaque : coins haut-gauche et bas-droit coupés (style jeu de stratégie).
+    static func plate(_ r: CGRect) -> UIBezierPath {
+        let c: CGFloat = 7
+        let p = UIBezierPath()
+        p.move(to: CGPoint(x: r.minX + c, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - c))
+        p.addLine(to: CGPoint(x: r.maxX - c, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY + c))
+        p.close()
+        return p
+    }
+
     override func draw(_ rect: CGRect) {
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
         let r = bounds.insetBy(dx: 1.5, dy: 1.5)
-        let body = UIBezierPath(roundedRect: r, cornerRadius: r.height / 2)
-        // Fond : sombre, teinté de la couleur du pays
+        let body = UnitTokenView.plate(r)
         let country = token.color.uiColor
-        ctx.addPath(body.cgPath)
-        ctx.setFillColor(UIColor(red: 0.05, green: 0.08, blue: 0.12, alpha: 0.96).cgColor)
-        ctx.fillPath()
+        // Fond : nuit profonde, éclairée par le haut
         ctx.saveGState()
         ctx.addPath(body.cgPath)
         ctx.clip()
-        ctx.setFillColor(country.withAlphaComponent(0.28).cgColor)
-        ctx.fill(r)
-        // Mélange des troupes : bande en bas
+        let space = CGColorSpaceCreateDeviceRGB()
+        if let g = CGGradient(colorsSpace: space, colors: [UIColor(red: 0.13, green: 0.18, blue: 0.26, alpha: 0.97).cgColor,
+                                                            UIColor(red: 0.04, green: 0.06, blue: 0.10, alpha: 0.97).cgColor] as CFArray,
+                              locations: [0, 1]) {
+            ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: r.minY), end: CGPoint(x: 0, y: r.maxY), options: [])
+        }
+        // Bande du pays à gauche, sous le drapeau
+        ctx.setFillColor(country.withAlphaComponent(0.75).cgColor)
+        ctx.fill(CGRect(x: r.minX, y: r.minY, width: 28, height: r.height))
+        ctx.setFillColor(UIColor.black.withAlphaComponent(0.25).cgColor)
+        ctx.fill(CGRect(x: r.minX + 28, y: r.minY, width: 1, height: r.height))
+        // Composition (haut) : une couleur par type de division
         var x = r.minX
         for (k, share) in token.mix.enumerated() where share > 0 {
             let w = r.width * CGFloat(share)
             ctx.setFillColor(UnitArt.mixColors[k % UnitArt.mixColors.count].cgColor)
-            ctx.fill(CGRect(x: x, y: r.maxY - 4, width: w, height: 4))
+            ctx.fill(CGRect(x: x, y: r.minY, width: w, height: 2.5))
             x += w
         }
+        // Moral (bas) : vert, ambre ou rouge
+        let org = CGFloat(token.org)
+        let moraleColor: UIColor = org >= 0.6 ? UIColor(Theme.teal) : (org >= 0.3 ? UIColor(Theme.amber) : UIColor(Theme.coral))
+        ctx.setFillColor(UIColor.white.withAlphaComponent(0.10).cgColor)
+        ctx.fill(CGRect(x: r.minX + 29, y: r.maxY - 3.5, width: r.width - 29, height: 3.5))
+        ctx.setFillColor(moraleColor.cgColor)
+        ctx.fill(CGRect(x: r.minX + 29, y: r.maxY - 3.5, width: (r.width - 29) * org, height: 3.5))
         ctx.restoreGState()
-        // Contour : couleur du pays (doré si sélectionné, rouge au combat)
-        let stroke: UIColor = token.selected ? UIColor(Theme.amber) : (token.engaged ? UIColor(Theme.coral) : country)
+        // Contour : couleur du pays (doré si sélectionné, rouge au combat, pointillé si au service d'un autre)
+        let stroke: UIColor = token.selected ? UIColor(Theme.amber) : (token.engaged ? UIColor(Theme.coral) : country.lighter(0.25))
         ctx.addPath(body.cgPath)
         ctx.setStrokeColor(stroke.cgColor)
-        ctx.setLineWidth(token.selected ? 3 : 2)
+        ctx.setLineWidth(token.selected ? 3 : 1.6)
         if token.serving { ctx.setLineDash(phase: 0, lengths: [4, 3]) }
         ctx.strokePath()
         ctx.setLineDash(phase: 0, lengths: [])
-        // Drapeau dans une pastille
-        let flagBox = CGRect(x: r.minX + 3, y: r.midY - 12, width: 24, height: 24)
-        ctx.setFillColor(UIColor.white.withAlphaComponent(0.12).cgColor)
-        ctx.fillEllipse(in: flagBox)
+        // Drapeau
         let flag = token.flag as NSString
         let fAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 15)]
         let fs = flag.size(withAttributes: fAttrs)
-        flag.draw(at: CGPoint(x: flagBox.midX - fs.width / 2, y: flagBox.midY - fs.height / 2 - 1), withAttributes: fAttrs)
+        flag.draw(at: CGPoint(x: r.minX + 14 - fs.width / 2, y: r.midY - fs.height / 2), withAttributes: fAttrs)
         // Pictogramme du type dominant
-        UnitArt.draw(token.mainType, in: CGRect(x: r.minX + 31, y: r.minY + 6, width: 26, height: 16), context: ctx)
+        UnitArt.draw(token.mainType, in: CGRect(x: r.minX + 33, y: r.minY + 7, width: 26, height: 16), context: ctx)
         // Effectif
         let count = "\(token.count)" as NSString
-        let cAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 14, weight: .heavy),
-                                                     .foregroundColor: UIColor.white]
+        let cAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .black),
+            .foregroundColor: UIColor.white
+        ]
         let cs = count.size(withAttributes: cAttrs)
-        count.draw(at: CGPoint(x: r.maxX - 8 - cs.width, y: r.midY - cs.height / 2 - 2), withAttributes: cAttrs)
-        // Petit point d'état : entraînement (or), en marche (bleu), tient une frontière (vert).
+        count.draw(at: CGPoint(x: r.maxX - 7 - cs.width, y: r.midY - cs.height / 2 - 1.5), withAttributes: cAttrs)
+        // Galons d'expérience (chevrons dorés) au-dessus du pictogramme
+        if token.rank > 0 {
+            ctx.setStrokeColor(UIColor(Theme.amber).cgColor)
+            ctx.setLineWidth(1.4)
+            for k in 0..<token.rank {
+                let y0 = r.minY + 3.5 + CGFloat(k) * 2.6
+                ctx.move(to: CGPoint(x: r.minX + 41, y: y0 + 2))
+                ctx.addLine(to: CGPoint(x: r.minX + 46, y: y0))
+                ctx.addLine(to: CGPoint(x: r.minX + 51, y: y0 + 2))
+            }
+            ctx.strokePath()
+        }
+        // Point d'état : entraînement (or), en marche (bleu), tient une frontière (vert)
         var badge: UIColor?
         if token.training { badge = UIColor(Theme.amber) } else if token.moving { badge = UIColor(Theme.sky) }
         else if token.onBorder { badge = UIColor(Theme.teal) }
         if let b = badge {
+            let d = CGRect(x: r.maxX - 9, y: r.minY - 2, width: 9, height: 9)
+            let diamond = UIBezierPath()
+            diamond.move(to: CGPoint(x: d.midX, y: d.minY))
+            diamond.addLine(to: CGPoint(x: d.maxX, y: d.midY))
+            diamond.addLine(to: CGPoint(x: d.midX, y: d.maxY))
+            diamond.addLine(to: CGPoint(x: d.minX, y: d.midY))
+            diamond.close()
+            ctx.addPath(diamond.cgPath)
             ctx.setFillColor(b.cgColor)
-            ctx.fillEllipse(in: CGRect(x: r.maxX - 11, y: r.minY - 1, width: 9, height: 9))
-            ctx.setStrokeColor(UIColor.black.withAlphaComponent(0.6).cgColor)
+            ctx.fillPath()
+            ctx.addPath(diamond.cgPath)
+            ctx.setStrokeColor(UIColor.black.withAlphaComponent(0.7).cgColor)
             ctx.setLineWidth(1)
-            ctx.strokeEllipse(in: CGRect(x: r.maxX - 11, y: r.minY - 1, width: 9, height: 9))
+            ctx.strokePath()
         }
     }
 }
@@ -728,7 +775,7 @@ final class BattleBadgeView: UIView {
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.6
         layer.shadowRadius = 4
-        layer.shadowPath = UIBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), cornerRadius: 11).cgPath
+        layer.shadowPath = UnitTokenView.plate(bounds.insetBy(dx: 1, dy: 1)).cgPath
         // Pulsation de l'ombre (et non de la taille, qui suit le zoom).
         let pulse = CABasicAnimation(keyPath: "shadowRadius")
         pulse.fromValue = 2; pulse.toValue = 8; pulse.duration = 0.6; pulse.autoreverses = true; pulse.repeatCount = .infinity
@@ -740,9 +787,9 @@ final class BattleBadgeView: UIView {
     override func draw(_ rect: CGRect) {
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
         let r = bounds.insetBy(dx: 1, dy: 1)
-        let path = UIBezierPath(roundedRect: r, cornerRadius: r.height / 2)
+        let path = UnitTokenView.plate(r)
         ctx.addPath(path.cgPath)
-        ctx.setFillColor(UIColor(red: 0.12, green: 0.05, blue: 0.05, alpha: 0.95).cgColor)
+        ctx.setFillColor(UIColor(red: 0.14, green: 0.04, blue: 0.05, alpha: 0.96).cgColor)
         ctx.fillPath()
         ctx.saveGState()
         ctx.addPath(path.cgPath)

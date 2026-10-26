@@ -74,8 +74,8 @@ struct BattleArena: View {
             LinearGradient(colors: [Color(uiColor: Theme.politicalColor(battle.attacker)).opacity(0.22), Theme.deep.opacity(0.9),
                                     Color(uiColor: Theme.politicalColor(battle.defender)).opacity(0.22)],
                            startPoint: .leading, endPoint: .trailing),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.white.opacity(0.08)))
+            in: HUDShape(cut: 11))
+        .overlay(HUDShape(cut: 11).strokeBorder(Color.white.opacity(0.08)))
     }
 
     private func column(title: String, id: CountryID, name: String, divisions: [DivisionType: Int], org: Double,
@@ -238,7 +238,7 @@ struct WhyStrip: View {
                 }
                 .padding(8)
                 .frame(maxWidth: .infinity, minHeight: 112)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Color.white.opacity(0.05), in: HUDShape(cut: 8))
             }
         }
     }
@@ -299,7 +299,7 @@ struct BattleReportPanel: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Theme.deep.opacity(0.75), in: HUDShape(cut: 10))
                 Dossier(title: "Pertes") {
                     lossRow(r.attacker, sim.name(r.attacker), r.attackerLosses, r.attackerDivisions,
                             max(r.attackerLosses, r.defenderLosses))
@@ -315,8 +315,8 @@ struct BattleReportPanel: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.amber.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.amber.opacity(0.4)))
+                .background(Theme.amber.opacity(0.12), in: HUDShape(cut: 10))
+                .overlay(HUDShape(cut: 10).strokeBorder(Theme.amber.opacity(0.4)))
             }
         } else {
             PanelHeader(title: "Rapport indisponible", subtitle: nil) { store.panel = nil }

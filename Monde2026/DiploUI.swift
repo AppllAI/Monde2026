@@ -71,7 +71,7 @@ struct QuickDiplomacyBar: View {
                     }
                     .foregroundStyle(a.tint)
                     .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(a.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(a.tint.opacity(0.12), in: HUDShape(cut: 7))
                 }
                 .buttonStyle(Pressable())
             }

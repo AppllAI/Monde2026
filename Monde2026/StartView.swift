@@ -189,8 +189,8 @@ struct CountryCard: View {
         }
         .padding(12)
         .background(selected ? Theme.amber.opacity(0.16) : Color.white.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    in: HUDShape(cut: 8))
+        .overlay(HUDShape(cut: 8)
             .strokeBorder(selected ? Theme.amber : Theme.line, lineWidth: selected ? 2 : 1))
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)

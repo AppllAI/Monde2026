@@ -27,7 +27,7 @@ struct IndustryCard: View {
                     Image(systemName: kind.icon).font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.ink)
                         .frame(width: 42, height: 42)
-                        .background(kind.color, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .background(kind.color, in: HUDShape(cut: 7))
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(kind.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)

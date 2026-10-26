@@ -35,7 +35,7 @@ struct EventPanel: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(14)
                         .background(index == 0 ? Theme.amber : Theme.paper.opacity(0.85),
-                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    in: HUDShape(cut: 8))
                     }
                     .buttonStyle(.plain)
                 }

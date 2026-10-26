@@ -168,8 +168,8 @@ struct BigOrderLabel: View {
         }
         .foregroundStyle(tint)
         .frame(maxWidth: .infinity, minHeight: 56)
-        .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(tint.opacity(0.25)))
+        .background(tint.opacity(0.13), in: HUDShape(cut: 8))
+        .overlay(HUDShape(cut: 8).strokeBorder(tint.opacity(0.25)))
     }
 }
 
@@ -193,7 +193,7 @@ struct BattleStrip: View {
             Meter(value: battle.captureProgress, tint: side == -1 ? Theme.coral : Theme.teal, height: 6)
         }
         .padding(10)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.white.opacity(0.06), in: HUDShape(cut: 7))
     }
 }
 
@@ -263,7 +263,7 @@ struct GeneralRow: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.ink)
                 .frame(width: 32, height: 32)
-                .background(Theme.amber, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .background(Theme.amber, in: HUDShape(cut: 5))
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(general.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
@@ -337,7 +337,7 @@ struct StancePicker: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .foregroundStyle(current == s ? Theme.ink : Theme.paper)
                     .background(current == s ? tint(s) : Color.white.opacity(0.07),
-                                in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                                in: HUDShape(cut: 7))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Posture \(s.name)")
@@ -436,7 +436,7 @@ struct BattlePanel: View {
             Text(explanation(b)).font(.system(size: 12)).foregroundStyle(Theme.steel)
         }
         .padding(14)
-        .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.deep.opacity(0.75), in: HUDShape(cut: 10))
         // 2. L'arène : les deux camps face à face, le duel des tactiques, la corde du rapport de force
         let forces = sim.battleForces(b)
         BattleArena(battle: b, attack: forces.attack, defense: forces.defense, side: side,
@@ -485,7 +485,7 @@ struct BattlePanel: View {
             }
             .foregroundStyle(Theme.paper)
             .padding(12)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Color.white.opacity(0.05), in: HUDShape(cut: 7))
         }
         .buttonStyle(.plain)
         if details {
@@ -629,8 +629,8 @@ struct SideCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(isPlayer ? Theme.amber.opacity(0.6) : Color.clear))
+        .background(Theme.deep.opacity(0.75), in: HUDShape(cut: 8))
+        .overlay(HUDShape(cut: 8).strokeBorder(isPlayer ? Theme.amber.opacity(0.6) : Color.clear))
     }
 }
 
@@ -650,8 +650,8 @@ struct TacticTile: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(highlight ? 0.12 : 0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(highlight ? Theme.amber : Color.clear))
+        .background(Color.white.opacity(highlight ? 0.12 : 0.05), in: HUDShape(cut: 7))
+        .overlay(HUDShape(cut: 7).strokeBorder(highlight ? Theme.amber : Color.clear))
     }
 }
 
@@ -685,8 +685,8 @@ struct TacticChoice: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
-            .background(selected ? Theme.amber : Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .background(selected ? Theme.amber : Color.white.opacity(0.06), in: HUDShape(cut: 7))
+            .overlay(HUDShape(cut: 7)
                 .strokeBorder(beatsCurrent && !selected ? Theme.amber.opacity(0.7) : Color.clear, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
@@ -715,7 +715,7 @@ struct ModifierList: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Theme.deep.opacity(0.75), in: HUDShape(cut: 8))
     }
 
     private func percent(_ v: Double) -> String {
@@ -770,7 +770,7 @@ struct BattleRow: View {
             .clipShape(Capsule())
         }
         .padding(10)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.white.opacity(0.05), in: HUDShape(cut: 7))
     }
 }
 

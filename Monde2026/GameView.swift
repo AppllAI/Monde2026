@@ -147,8 +147,8 @@ struct PanelDrawer: View {
         PanelHost(store: store, panel: panel)
             .frame(maxHeight: .infinity, alignment: .top)
             .background(Theme.ink.opacity(0.97))
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Theme.line))
+            .clipShape(HUDShape(cut: 16))
+            .overlay(HUDShape(cut: 16).strokeBorder(Theme.line))
             .overlay(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.25)).frame(width: 5, height: 46).padding(.leading, 6)
             }
@@ -237,7 +237,8 @@ struct SpeedControl: View {
             speedButton(3, icon: "forward.end.alt.fill", label: "Vitesse 3")
         }
         .padding(3)
-        .background(Color.white.opacity(0.07), in: Capsule())
+        .background(HUDShape(cut: 7, radius: 2).fill(Color.white.opacity(0.06)))
+        .overlay(HUDShape(cut: 7, radius: 2).strokeBorder(Color.white.opacity(0.12)))
     }
 
     private func speedButton(_ value: Int, icon: String, label: String) -> some View {
@@ -246,11 +247,12 @@ struct SpeedControl: View {
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .bold))
-                .frame(width: 32, height: 28)
+                .frame(width: 34, height: 30)
                 .foregroundStyle(store.speed == value ? Theme.ink : Theme.paper)
-                .background(store.speed == value ? Theme.amber : Color.clear, in: Capsule())
+                .background(HUDShape(cut: 5, radius: 1.5).fill(store.speed == value ? AnyShapeStyle(value == 0 ? Theme.coral : Theme.amber) : AnyShapeStyle(Color.clear)))
+                .shadow(color: store.speed == value ? Theme.amber.opacity(0.5) : .clear, radius: 5)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Pressable())
         .accessibilityLabel(label)
     }
 }
@@ -273,11 +275,12 @@ struct GameMenu: View {
                 Label("Quitter vers le menu", systemImage: "rectangle.portrait.and.arrow.right")
             }
         } label: {
-            Image(systemName: "ellipsis")
+            Image(systemName: "line.3.horizontal")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(Theme.paper)
-                .frame(width: 34, height: 34)
-                .background(Color.white.opacity(0.07), in: Circle())
+                .frame(width: 36, height: 36)
+                .background(HUDShape(cut: 7, radius: 2).fill(Color.white.opacity(0.07)))
+                .overlay(HUDShape(cut: 7, radius: 2).strokeBorder(Color.white.opacity(0.14)))
         }
         .accessibilityLabel("Menu")
     }

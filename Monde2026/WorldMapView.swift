@@ -961,10 +961,10 @@ final class ProvinceRenderer: MKOverlayRenderer {
         let scale = CGFloat(label.size) / base
         let font: UIFont
         if label.isCountry {
-            let f = UIFont.systemFont(ofSize: base, weight: .bold)
-            font = f.fontDescriptor.withDesign(.serif).map { UIFont(descriptor: $0, size: base) } ?? f
+            // Capitales étroites et grasses : le style des grands jeux de stratégie modernes.
+            font = UIFont.systemFont(ofSize: base, weight: .heavy, width: .condensed)
         } else {
-            font = UIFont.italicSystemFont(ofSize: base)
+            font = UIFont.systemFont(ofSize: base, weight: .medium, width: .condensed)
         }
         let textColor: UIColor
         if label.isCountry {
