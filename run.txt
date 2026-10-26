@@ -1,0 +1,2 @@
+App : build-ipad/Monde2026.swiftpm/dd/Build/Products/Debug-iphonesimulator/Monde 2026.app
+Jeu toujours lancé : OK

@@ -1,0 +1,13 @@
+Command line invocation:
+    /Applications/Xcode_16.4.app/Contents/Developer/usr/bin/xcodebuild -list
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  Monde 2026: /Users/runner/work/Monde2026/Monde2026/build-ipad/Monde2026.swiftpm
+
+Information about workspace "Monde2026":
+    Schemes:
+        Monde 2026
+
