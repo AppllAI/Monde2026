@@ -315,12 +315,62 @@ extension Simulation {
 
     /// Chaque mois, les relations tendent vers (structure + mémoire historique). La mémoire s'efface lentement.
     mutating func driftRelations() {
-        for key in Array(state.relations.keys) {
+        // Tout ce qui fait la relation « structurelle » est rangé une fois pour toutes (traités, blocs,
+        // revendications, guerres) : la mise à jour des ~14 000 paires de pays devient très rapide.
+        var treatyFlags: [String: (Double, Bool, Bool)] = [:]     // bonus, garantie, sanctions
+        for t in state.treaties {
+            let k = Simulation.pairKey(t.a, t.b)
+            var f = treatyFlags[k] ?? (0, false, false)
+            switch t.kind {
+            case .alliance: f.0 += 30
+            case .tradePact: f.0 += 10
+            case .nonAggression: f.0 += 5
+            case .guarantee: f.1 = true
+            case .sanctions: f.2 = true
+            }
+            treatyFlags[k] = f
+        }
+        var blocsOf: [CountryID: [Int]] = [:]
+        for (i, b) in state.blocs.enumerated() { for m in b.members { blocsOf[m, default: []].append(i) } }
+        let nato = Set(bloc("OTAN")?.members ?? []), csto = Set(bloc("OTSC")?.members ?? [])
+        var claimed = Set<String>()
+        for c in state.claims { claimed.insert(Simulation.pairKey(c.claimant, c.target)) }
+        var atWar = Set<String>()
+        for w in state.wars where w.isActive {
+            for x in w.attackers { for y in w.defenders { atWar.insert(Simulation.pairKey(x, y)) } }
+        }
+        var democratic: [CountryID: Bool] = [:]
+        for (id, c) in state.countries { democratic[id] = c.government.isDemocratic }
+        func structural(_ a: CountryID, _ b: CountryID, _ key: String) -> Double {
+            var r = 0.0
+            var military = false, economic = false, political = false
+            let ba = blocsOf[a] ?? [], bb = blocsOf[b] ?? []
+            for i in ba where bb.contains(i) {
+                let bloc = state.blocs[i]
+                if bloc.isMilitary { military = true } else if bloc.isEconomic { economic = true } else { political = true }
+            }
+            if military { r += 35 }
+            if economic { r += 20 }
+            if political { r += 10 }
+            if let f = treatyFlags[key] {
+                r += f.0
+                if f.1 { r += 20 }
+                if f.2 { r -= 35 }
+            }
+            if claimed.contains(key) { r -= 30 }
+            if (nato.contains(a) && csto.contains(b)) || (csto.contains(a) && nato.contains(b)) { r -= 25 }
+            if atWar.contains(key) { r -= 100 }
+            if let da = democratic[a], let db = democratic[b] {
+                r += da && db ? 10 : (da != db ? -5 : 5)
+            }
+            return r.clamped(-100, 100)
+        }
+        for (key, value) in state.relations {
             let parts = key.split(separator: "|")
-            guard parts.count == 2, let value = state.relations[key] else { continue }
+            guard parts.count == 2 else { continue }
             let a = String(parts[0]), b = String(parts[1])
             let memory = state.relationMemory[key] ?? 0
-            let target = (structuralRelation(a, b) + memory).clamped(-100, 100)
+            let target = (structural(a, b, key) + memory).clamped(-100, 100)
             state.relations[key] = value + (target - value) * 0.04
         }
         for key in Array(state.relationMemory.keys) {

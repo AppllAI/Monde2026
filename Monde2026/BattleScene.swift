@@ -114,7 +114,7 @@ struct BattleArena: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 60, alignment: trailing ? .topTrailing : .topLeading)
                 if list.count > 30 {
-                    Text("+\(list.count - 30) divisions").font(.system(size: 10)).foregroundStyle(Theme.steel)
+                    Text("+\(list.count - 30) division\(list.count - 30 > 1 ? "s" : "")").font(.system(size: 10)).foregroundStyle(Theme.steel)
                 }
             }
             VStack(alignment: trailing ? .trailing : .leading, spacing: 3) {
