@@ -69,6 +69,11 @@ enum Theme {
     ]
 
     static func politicalColor(_ id: CountryID) -> UIColor {
+        if let c = palette[id] { return c }
+        return baseColor(id)
+    }
+
+    private static func baseColor(_ id: CountryID) -> UIColor {
         if let v = iconic[id] { return hex(v) }
         var hash: UInt32 = 2166136261
         for scalar in id.unicodeScalars {
@@ -79,6 +84,56 @@ enum Theme {
         let bri = 0.62 + CGFloat((hash >> 17) % 18) / 100
         return UIColor(hue: hue, saturation: sat, brightness: bri, alpha: 1)
     }
+
+    /// Palette finale : chaque pays garde sa couleur « historique », sauf si un voisin a presque la même
+    /// (Ukraine et Roumanie, par exemple) ; le plus petit des deux change alors légèrement de teinte.
+    private static let palette: [CountryID: UIColor] = {
+        var area: [CountryID: Double] = [:]
+        var neighbors: [CountryID: Set<CountryID>] = [:]
+        let provinces = ProvinceMap.all
+        for p in provinces {
+            area[p.country, default: 0] += p.weight
+            for n in p.neighbors where provinces[n].country != p.country {
+                neighbors[p.country, default: []].insert(provinces[n].country)
+            }
+        }
+        func rgb(_ c: UIColor) -> (CGFloat, CGFloat, CGFloat) {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            c.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return (r, g, b)
+        }
+        func distance(_ a: UIColor, _ b: UIColor) -> CGFloat {
+            let x = rgb(a), y = rgb(b)
+            let dr = x.0 - y.0, dg = x.1 - y.1, db = x.2 - y.2
+            return (2 * dr * dr + 4 * dg * dg + 3 * db * db).squareRoot() / 3
+        }
+        var out: [CountryID: UIColor] = [:]
+        for id in area.keys.sorted(by: { (area[$0] ?? 0, $0) > (area[$1] ?? 0, $1) }) {
+            let base = baseColor(id)
+            let near = (neighbors[id] ?? []).compactMap { out[$0] }
+            func score(_ c: UIColor) -> CGFloat { near.map { distance(c, $0) }.min() ?? 1 }
+            if score(base) >= 0.13 {
+                out[id] = base
+                continue
+            }
+            var h: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0, a: CGFloat = 0
+            base.getHue(&h, saturation: &sat, brightness: &bri, alpha: &a)
+            var best = base
+            var bestScore = score(base)
+            search: for shift in [0.07, -0.07, 0.14, -0.14, 0.22, -0.22, 0.33, -0.33, 0.5] as [CGFloat] {
+                for dBri in [0, -0.12, 0.1] as [CGFloat] {
+                    var hue = (h + shift).truncatingRemainder(dividingBy: 1)
+                    if hue < 0 { hue += 1 }
+                    let c = UIColor(hue: hue, saturation: sat, brightness: min(0.9, max(0.4, bri + dBri)), alpha: 1)
+                    let sc = score(c)
+                    if sc > bestScore { best = c; bestScore = sc }
+                    if sc >= 0.13 { break search }
+                }
+            }
+            out[id] = best
+        }
+        return out
+    }()
 
     /// −100 → corail, 0 → acier, +100 → sarcelle.
     static func relationColor(_ value: Double) -> Color {

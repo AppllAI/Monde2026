@@ -60,7 +60,7 @@ jobs:
           grep -a "SELFTEST" selftest.log > /tmp/out/selftest.txt || true
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
-          xcrun simctl launch "$UDID" $BUNDLE -autostart FRA -speed 3
+          xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 3 -perf
           sleep 40
           xcrun simctl io "$UDID" screenshot /tmp/out/ipad-debug.png
           if xcrun simctl spawn "$UDID" launchctl list | grep -q "$BUNDLE"; then

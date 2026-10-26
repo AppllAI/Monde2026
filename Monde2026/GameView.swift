@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // =============================================================
 //  GameView.swift
@@ -9,6 +10,7 @@ import SwiftUI
 struct GameView: View {
     @ObservedObject var store: GameStore
     @AppStorage("tutorialSeen") private var tutorialSeen = false
+    @AppStorage("showPerf") private var showPerf = false
 
     @State private var wideLayout = true
 
@@ -18,12 +20,8 @@ struct GameView: View {
         GeometryReader { geo in
             let wide = geo.size.width > 700
             ZStack(alignment: .trailing) {
-                WorldMapView(snapshot: store.mapSnapshot, units: store.unitsSnapshot, unitAnimation: store.unitAnimation,
-                             satellite: store.satellite, focus: store.focus,
-                             onTap: { tap in store.handleTap(tap) },
-                             onDrop: { id, province, facing in store.dropArmy(id, at: province, facing: facing) })
-                .equatable()
-                .ignoresSafeArea()
+                MapHost(feed: store.feed, store: store, satellite: store.satellite, focus: store.focus)
+                    .ignoresSafeArea()
                 VStack(spacing: 10) {
                     TopBar(store: store, wide: wide)
                     HStack(alignment: .top, spacing: 10) {
@@ -78,6 +76,15 @@ struct GameView: View {
                         .transition(.move(edge: .trailing))
                         .id(GameSection.of(panel).map { "\($0)" } ?? panel.id)
                 }
+                if showPerf || LaunchOptions.arguments.contains("-perf") {
+                    VStack {
+                        HStack { PerfBadge(store: store); Spacer() }
+                        Spacer()
+                    }
+                    .padding(.top, 76)
+                    .padding(.leading, 16)
+                    .allowsHitTesting(false)
+                }
                 if !tutorialSeen {
                     TutorialOverlay { tutorialSeen = true }
                 }
@@ -108,6 +115,25 @@ struct GameView: View {
         }, set: { value in
             if value == nil, let p = store.panel, !(wideLayout && !p.isModal) { store.panel = nil }
         })
+    }
+}
+
+/// La carte : elle observe seulement son flux (régions, unités), pas tout le magasin.
+/// Ainsi, chaque jour de jeu ne fait bouger que les pions, sans recalculer toute l'interface.
+struct MapHost: View {
+    @ObservedObject var feed: MapFeed
+    let store: GameStore
+    let satellite: Bool
+    let focus: MapFocus?
+
+    var body: some View {
+        WorldMapView(snapshot: feed.map, units: feed.units, unitAnimation: feed.animation,
+                     satellite: satellite, focus: focus,
+                     onTap: { tap in store.handleTap(tap) },
+                     onDrop: { id, province, facing in store.dropArmy(id, at: province, facing: facing) },
+                     onPreview: { id, province in store.previewOrder(id, to: province) },
+                     onLasso: { ids in store.lassoSelect(ids) })
+            .equatable()
     }
 }
 
@@ -231,6 +257,7 @@ struct SpeedControl: View {
 
 struct GameMenu: View {
     @ObservedObject var store: GameStore
+    @AppStorage("showPerf") private var showPerf = false
 
     var body: some View {
         Menu {
@@ -238,6 +265,7 @@ struct GameMenu: View {
             Button { store.load() } label: { Label("Charger la sauvegarde", systemImage: "arrow.clockwise") }
             Toggle(isOn: $store.satellite) { Label("Vue satellite", systemImage: "globe") }
             Toggle(isOn: $store.autoPause) { Label("Pause sur les événements", systemImage: "bell") }
+            Toggle(isOn: $showPerf) { Label("Afficher la fluidité", systemImage: "speedometer") }
             Button { store.step(days: 30) } label: { Label("Avancer d'un mois", systemImage: "calendar") }
             Button { store.open(.endGame) } label: { Label("Score et objectifs", systemImage: "trophy") }
             Divider()
@@ -459,5 +487,62 @@ struct TutorialOverlay: View {
             .glass(24)
             .padding(24)
         }
+    }
+}
+
+// MARK: - Mesure de la fluidité
+
+/// Compte les images réellement affichées par seconde.
+final class FrameCounter: NSObject, ObservableObject {
+    @Published private(set) var fps = 0
+    private var link: CADisplayLink?
+    private var frames = 0
+    private var since = CACurrentMediaTime()
+
+    /// Intermédiaire faible : le lien d'affichage ne garde pas le compteur en vie.
+    private final class Proxy: NSObject {
+        weak var owner: FrameCounter?
+        @objc func tick() { owner?.tick() }
+    }
+
+    func start() {
+        guard link == nil else { return }
+        let proxy = Proxy()
+        proxy.owner = self
+        let l = CADisplayLink(target: proxy, selector: #selector(Proxy.tick))
+        l.add(to: .main, forMode: .common)
+        link = l
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+    }
+
+    fileprivate func tick() {
+        frames += 1
+        let now = CACurrentMediaTime()
+        if now - since >= 0.5 {
+            fps = Int((Double(frames) / (now - since)).rounded())
+            frames = 0
+            since = now
+        }
+    }
+}
+
+/// Petit compteur : images par seconde et temps de calcul d'un jour de jeu.
+struct PerfBadge: View {
+    let store: GameStore
+    @StateObject private var counter = FrameCounter()
+
+    var body: some View {
+        let ms = Int((store.dayCost * 1000).rounded())
+        Text("\(counter.fps) img/s · jour \(ms) ms")
+            .font(Theme.data(12, weight: .semibold))
+            .foregroundStyle(counter.fps >= 50 ? Theme.teal : (counter.fps >= 30 ? Theme.amber : Theme.coral))
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(Color.black.opacity(0.6), in: Capsule())
+            .onAppear { counter.start() }
+            .onDisappear { counter.stop() }
     }
 }

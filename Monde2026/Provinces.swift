@@ -352,3 +352,77 @@ extension Simulation {
         return candidates.sorted { frontDistance($0) < frontDistance($1) }
     }
 }
+
+// MARK: - Contours simplifiés (vues éloignées)
+
+/// Les contours complets comptent ~300 000 points : vue du monde, on dessine des versions allégées
+/// (invisibles à l'œil : on n'enlève que des détails plus petits qu'un pixel). Calculées une fois, à la demande.
+enum MapDetail {
+    /// Tolérance de chaque niveau, en points MapKit.
+    static let tolerances: [Double] = [1_500, 9_000, 40_000]
+
+    static let provincePaths: [[CGPath]] = tolerances.map { tol in
+        ProvinceMap.all.map { simplified($0.rings, tolerance: tol, closed: true) }
+    }
+
+    static let borderPaths: [[CGPath]] = tolerances.map { tol in
+        ProvinceMap.borders.map { simplified($0.lines, tolerance: tol, closed: false) }
+    }
+
+    /// Niveau à utiliser quand un pixel vaut `px` points MapKit (nil = contours complets).
+    static func level(forPixel px: Double) -> Int? {
+        var best: Int?
+        for (i, tol) in tolerances.enumerated() where tol <= px * 0.6 { best = i }
+        return best
+    }
+
+    static func provincePath(_ id: Int, level: Int?) -> CGPath {
+        guard let l = level else { return ProvinceMap.all[id].path }
+        return provincePaths[l][id]
+    }
+
+    static func borderPath(_ id: Int, level: Int?) -> CGPath {
+        guard let l = level else { return ProvinceMap.borders[id].path }
+        return borderPaths[l][id]
+    }
+
+    private static func simplified(_ rings: [[MKMapPoint]], tolerance: Double, closed: Bool) -> CGPath {
+        let path = CGMutablePath()
+        let t2 = tolerance * tolerance
+        // On garde toujours le plus grand contour, même minuscule (sinon la région disparaîtrait).
+        let largest = rings.indices.max { rings[$0].count < rings[$1].count }
+        for (k, ring) in rings.enumerated() where ring.count >= 2 {
+            var minX = Double.infinity, maxX = -Double.infinity, minY = Double.infinity, maxY = -Double.infinity
+            for p in ring {
+                minX = min(minX, p.x); maxX = max(maxX, p.x); minY = min(minY, p.y); maxY = max(maxY, p.y)
+            }
+            if closed && k != largest && max(maxX - minX, maxY - minY) < tolerance * 1.5 { continue }
+            var last = ring[0]
+            path.move(to: CGPoint(x: last.x, y: last.y))
+            var added = 0
+            for p in ring.dropFirst().dropLast() {
+                let dx = p.x - last.x, dy = p.y - last.y
+                if dx * dx + dy * dy >= t2 {
+                    path.addLine(to: CGPoint(x: p.x, y: p.y))
+                    last = p
+                    added += 1
+                }
+            }
+            let end = ring[ring.count - 1]
+            path.addLine(to: CGPoint(x: end.x, y: end.y))
+            if closed {
+                if added < 2 {
+                    // Contour réduit à presque rien : un petit losange pour rester visible.
+                    let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+                    let r = max((maxX - minX), (maxY - minY), tolerance * 0.6) / 2
+                    path.move(to: CGPoint(x: cx, y: cy - r))
+                    path.addLine(to: CGPoint(x: cx + r, y: cy))
+                    path.addLine(to: CGPoint(x: cx, y: cy + r))
+                    path.addLine(to: CGPoint(x: cx - r, y: cy))
+                }
+                path.closeSubpath()
+            }
+        }
+        return path
+    }
+}

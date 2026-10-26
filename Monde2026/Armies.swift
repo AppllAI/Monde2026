@@ -461,6 +461,29 @@ extension Simulation {
         return ActionResult(success: true, message: hostile == 1 ? "Attaque sur \(dest)." : "En route vers \(dest) (\(r.path.count) régions).")
     }
 
+    /// Aperçu d'un ordre (pendant qu'on fait glisser un pion) : trajet, durée estimée, combat ou non.
+    func previewOrder(_ armyID: Int, to target: Int) -> (path: [Int], days: Int, attack: Bool)? {
+        guard let a = state.armies.first(where: { $0.id == armyID }) else { return nil }
+        if target == a.province { return ([], 0, false) }
+        let foes = enemies(of: a.side)
+        let offensive = foes.contains(controller(of: target))
+        guard let r = route(for: a, to: target, throughEnemy: offensive) else { return nil }
+        var days = 0.0
+        var from = a.province
+        let infra = 0.6 + 0.4 * (state.countries[a.owner]?.infrastructure ?? 0.5)
+        for p in r.path {
+            if r.amphibious {
+                days += distanceKm(from, p) / 400 + 3
+            } else {
+                let speed = (a.isMotorized ? 45.0 : 30.0) * infra * TerrainMap.terrain(p).movement * weather(at: p).movement
+                days += distanceKm(from, p) / max(5, speed)
+            }
+            from = p
+        }
+        let attack = r.path.contains { foes.contains(controller(of: $0)) }
+        return (r.path, max(1, Int(days.rounded(.up))), attack)
+    }
+
     /// Ajoute une étape : l'armée finit son trajet actuel puis va jusqu'à cette région (détours, contournements).
     mutating func appendRoute(_ armyID: Int, via target: Int) -> ActionResult {
         guard let i = state.armies.firstIndex(where: { $0.id == armyID }) else {

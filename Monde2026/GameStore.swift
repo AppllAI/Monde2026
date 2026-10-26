@@ -100,6 +100,26 @@ enum MapMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Ce que la carte affiche. Séparé du magasin : la carte se met à jour à chaque jour de jeu
+/// sans que tout le reste de l'interface (barres, panneaux) soit recalculé.
+@MainActor
+final class MapFeed: ObservableObject {
+    @Published var map = MapSnapshot.empty
+    @Published var units = UnitsSnapshot.empty
+    /// Durée du glissement des pions : l'intervalle réel entre deux jours de jeu.
+    var animation: TimeInterval = 0.3
+}
+
+/// Résultat d'un jour de jeu calculé en arrière-plan.
+private struct StepResult {
+    let sim: Simulation
+    let signature: Int
+    let units: UnitsSnapshot
+    let selection: Int?
+    let group: Set<Int>
+    let elapsed: TimeInterval
+}
+
 @MainActor
 final class GameStore: ObservableObject {
     /// Le moteur. Il n'est pas « @Published » pour être modifié sur place (rapide) ;
@@ -112,9 +132,20 @@ final class GameStore: ObservableObject {
     @Published var mapMode: MapMode = .political {
         didSet { refreshMap() }
     }
-    @Published private(set) var mapSnapshot = MapSnapshot.empty
-    @Published private(set) var unitsSnapshot = UnitsSnapshot.empty
+    let feed = MapFeed()
+    var mapSnapshot: MapSnapshot { feed.map }
+    var unitsSnapshot: UnitsSnapshot { feed.units }
     private var territorySignature = 0
+    /// Change à chaque action du joueur : un jour calculé en arrière-plan pendant une action est jeté (puis recalculé).
+    private var mutationCount = 0
+    private var mapGeneration = 0
+    private var mapSelected: CountryID?
+    private var lastArmyTap: (id: Int, time: Date)?
+    private var lastLanded = Date()
+    private var lastUIPublish = Date.distantPast
+    private var achievementCount = 0
+    /// Temps de calcul moyen d'un jour (affiché dans le menu, utile pour mesurer sur iPad).
+    private(set) var dayCost: TimeInterval = 0
     @Published var selectedProvince: Int?
     @Published var selectedCountry: CountryID?
     @Published var selectedArmy: Int?
@@ -143,6 +174,7 @@ final class GameStore: ObservableObject {
     // MARK: - Partie
 
     func newGame(as id: CountryID, difficulty: Difficulty = .normal) {
+        mutationCount += 1
         sim = Simulation(playerID: id, difficulty: difficulty)
         lastSeenEventID = (sim?.state.nextEventID ?? 1) - 1
         speed = 0
@@ -158,47 +190,86 @@ final class GameStore: ObservableObject {
 
     func quitToMenu() {
         loop?.cancel()
+        mutationCount += 1
         sim = nil
         panel = nil
         version += 1
     }
 
+    /// L'horloge : chaque jour est calculé HORS du fil principal (la carte et les gestes restent fluides),
+    /// puis le nouvel état remplace l'ancien d'un coup.
     private func startLoop() {
         loop?.cancel()
+        lastLanded = Date()
         loop = Task { [weak self] in
             while !Task.isCancelled {
-                let delay = self?.delay ?? 300_000_000
-                try? await Task.sleep(nanoseconds: delay)
                 guard let self else { return }
-                if self.speed > 0 && self.panel?.isModal != true {
-                    self.step(days: self.speed == 3 ? 2 : 1)
+                let started = Date()
+                if self.speed > 0 && self.panel?.isModal != true, let current = self.sim {
+                    let stamp = self.mutationCount
+                    let selection = self.selectedArmy
+                    let group = self.armyGroup
+                    let result = await Task.detached(priority: .userInitiated) { () -> StepResult in
+                        let t0 = Date()
+                        var next = current
+                        next.advance(days: 1)
+                        let signature = GameStore.territoryHash(next)
+                        let units = UnitsBuilder.build(next, selectedArmy: selection, group: group)
+                        return StepResult(sim: next, signature: signature, units: units, selection: selection,
+                                          group: group, elapsed: Date().timeIntervalSince(t0))
+                    }.value
+                    if Task.isCancelled { return }
+                    // Le joueur a agi pendant le calcul : on garde son action, le jour sera recalculé.
+                    if stamp == self.mutationCount && self.sim != nil {
+                        self.land(result)
+                    }
                 }
+                let wait = max(0.012, self.dayInterval - Date().timeIntervalSince(started))
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             }
         }
     }
 
-    private var delay: UInt64 {
+    /// Intervalle visé entre deux jours de jeu.
+    private var dayInterval: TimeInterval {
         switch speed {
-        case 1: return 700_000_000
-        case 2: return 250_000_000
-        case 3: return 90_000_000
-        default: return 300_000_000
+        case 1: return 0.55
+        case 2: return 0.2
+        case 3: return 0.07
+        default: return 0.15
         }
     }
 
+    private func land(_ r: StepResult) {
+        let now = Date()
+        let gap = min(1.0, now.timeIntervalSince(lastLanded))
+        lastLanded = now
+        sim = r.sim
+        dayCost = dayCost == 0 ? r.elapsed : dayCost * 0.9 + r.elapsed * 0.1
+        // Les pions glissent pendant exactement l'intervalle entre deux jours : mouvement continu.
+        feed.animation = max(0.05, gap)
+        if r.selection == selectedArmy && r.group == armyGroup {
+            feed.units = decorate(r.units)
+        } else {
+            refreshUnits()
+        }
+        afterStep(signature: r.signature, publish: now.timeIntervalSince(lastUIPublish) > 0.25 || speed == 1)
+    }
+
+    /// Avance immédiatement (sur le fil principal) : tests et « avancer d'un mois ».
     func step(days: Int = 1) {
         guard sim != nil else { return }
-        let before = sim!.state.day
+        mutationCount += 1
         sim!.advance(days: days)
-        version += 1
-        // La carte ne se redessine que tous les 5 jours (et au changement de mois) : c'est ce qui garde la fluidité.
-        _ = before
-        // Les unités bougent à chaque jour (léger) ; la carte des régions seulement si le territoire change.
         refreshUnits()
-        let signature = territoryHash()
+        afterStep(signature: GameStore.territoryHash(sim!), publish: true)
+    }
+
+    private func afterStep(signature: Int, publish: Bool) {
+        guard sim != nil else { return }
         if signature != territorySignature || Simulation.calendar.component(.day, from: sim!.currentDate) == 1 {
             territorySignature = signature
-            refreshMap()
+            refreshMap(units: false)
         }
         if let id = selectedArmy, !(sim!.state.armies.contains { $0.id == id }) {
             selectedArmy = nil
@@ -211,12 +282,19 @@ final class GameStore: ObservableObject {
         }
         if !armyGroup.isEmpty {
             let alive = Set(sim!.state.armies.map { $0.id })
-            armyGroup = armyGroup.intersection(alive)
+            let kept = armyGroup.intersection(alive)
+            if kept != armyGroup { armyGroup = kept }
         }
         collectEvents()
         presentUrgent()
-        if let unlocked = sim?.state.achievements, !unlocked.isEmpty {
+        if let unlocked = sim?.state.achievements, unlocked.count != achievementCount {
+            achievementCount = unlocked.count
             AchievementStore.merge(unlocked)
+        }
+        // Le reste de l'interface (chiffres, panneaux) est rafraîchi au plus 4 fois par seconde.
+        if publish {
+            lastUIPublish = Date()
+            version += 1
         }
     }
 
@@ -234,6 +312,7 @@ final class GameStore: ObservableObject {
 
     func acknowledgeEnd() {
         guard sim != nil else { return }
+        mutationCount += 1
         sim!.state.record?.acknowledged = true
         panel = nil
         version += 1
@@ -260,6 +339,7 @@ final class GameStore: ObservableObject {
     /// Modifie le moteur puis rafraîchit l'interface.
     func mutate(_ body: (inout Simulation) -> Void) {
         guard sim != nil else { return }
+        mutationCount += 1
         body(&sim!)
         version += 1
         refreshMap()
@@ -270,6 +350,7 @@ final class GameStore: ObservableObject {
     @discardableResult
     func perform(_ body: (inout Simulation, CountryID) -> ActionResult) -> ActionResult {
         guard sim != nil, let p = playerID else { return ActionResult(success: false, message: "") }
+        mutationCount += 1
         let result = body(&sim!, p)
         feedback = result.message.isEmpty ? nil : result.message
         version += 1
@@ -296,24 +377,28 @@ final class GameStore: ObservableObject {
 
     // MARK: - Carte
 
-    /// Durée du glissement des pions : celle d'un jour de jeu à la vitesse choisie.
-    var unitAnimation: TimeInterval {
-        switch speed {
-        case 1: return 0.65
-        case 2: return 0.24
-        case 3: return 0.09
-        default: return 0.3
-        }
-    }
+    var unitAnimation: TimeInterval { feed.animation }
 
     func refreshUnits() {
-        guard let s = sim else { unitsSnapshot = .empty; return }
-        unitsSnapshot = UnitsBuilder.build(s, selectedArmy: selectedArmy, group: armyGroup)
+        guard let s = sim else { feed.units = .empty; return }
+        feed.units = decorate(UnitsBuilder.build(s, selectedArmy: selectedArmy, group: armyGroup))
+    }
+
+    /// Ajoute aux unités ce qui dépend de l'interface : région sélectionnée, régions constructibles.
+    private func decorate(_ units: UnitsSnapshot) -> UnitsSnapshot {
+        var u = units
+        u.selectedProvince = selectedProvince
+        u.highlight = highlightProvinces
+        return u
+    }
+
+    private var highlightProvinces: [Int] {
+        guard let kind = placing, let p = playerID, let s = sim else { return [] }
+        return (ProvinceMap.byCountry[p] ?? []).filter { s.canBuild(kind, at: $0, for: p) == nil }
     }
 
     /// Empreinte de ce qui change la couleur des régions (contrôle, guerres, traités, chantiers).
-    private func territoryHash() -> Int {
-        guard let s = sim else { return 0 }
+    nonisolated static func territoryHash(_ s: Simulation) -> Int {
         var h = Hasher()
         h.combine(s.state.control.count)
         for (k, v) in s.state.control.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
@@ -344,20 +429,49 @@ final class GameStore: ObservableObject {
         refreshUnits()
     }
 
-    func refreshMap() {
-        refreshUnits()
+    /// Après un changement de sélection : la carte des régions ne se recalcule que si le pays mis en valeur change.
+    func refreshSelection() {
+        var selected = selectedCountry
+        if case .country(let id)? = panel { selected = id }
+        if selected != mapSelected { refreshMap() } else { refreshUnits() }
+    }
+
+    /// Recalcule l'image de la carte des régions EN ARRIÈRE-PLAN ; seule la dernière demande compte.
+    /// Aperçu d'un ordre pendant le glisser d'un pion.
+    func previewOrder(_ army: Int, to province: Int) -> (path: [Int], days: Int, attack: Bool)? {
+        sim?.previewOrder(army, to: province)
+    }
+
+    /// Lasso : les pions entourés forment un groupe (le premier mène).
+    func lassoSelect(_ ids: [Int]) {
+        guard let first = ids.first else { return }
+        selectedArmy = first
+        armyGroup = Set(ids.dropFirst())
+        selectedCountry = nil
+        selectedProvince = nil
+        feedback = ids.count > 1 ? "\(ids.count) armées sélectionnées." : nil
+        refreshSelection()
+    }
+
+    func refreshMap(units: Bool = true) {
+        if units { refreshUnits() }
         guard let s = sim else {
-            mapSnapshot = .empty
+            feed.map = .empty
             return
         }
         var selected = selectedCountry
         if case .country(let id)? = panel { selected = id }
-        var highlight: Set<Int> = []
-        if let kind = placing, let p = playerID {
-            highlight = Set((ProvinceMap.byCountry[p] ?? []).filter { s.canBuild(kind, at: $0, for: p) == nil })
+        let mode = mapMode
+        mapSelected = selected
+        mapGeneration += 1
+        let generation = mapGeneration
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let snap = MapSnapshotBuilder.build(s, mode: mode, selected: selected, selectedProvince: nil)
+            await MainActor.run {
+                guard let self, generation == self.mapGeneration else { return }
+                if snap != self.feed.map { self.feed.map = snap }
+            }
         }
-        mapSnapshot = MapSnapshotBuilder.build(s, mode: mapMode, selected: selected, selectedProvince: selectedProvince,
-                                               selectedArmy: selectedArmy, group: armyGroup, highlight: highlight)
     }
 
     func handleTap(_ tap: MapTap) {
@@ -376,6 +490,17 @@ final class GameStore: ObservableObject {
     /// Toucher un pion : le sien = sélection (ou ajout au groupe) ; un ennemi = l'attaquer.
     func tapArmy(_ id: Int) {
         guard let s = sim, let a = s.state.armies.first(where: { $0.id == id }) else { return }
+        let now = Date()
+        let doubleTap = lastArmyTap?.id == id && now.timeIntervalSince(lastArmyTap!.time) < 0.4
+        lastArmyTap = (id, now)
+        if a.owner == playerID && doubleTap {
+            // Double-tap sur un pion : toutes nos armées du front avec lui.
+            selectedArmy = id
+            armyGroup = []
+            groupFront()
+            if !armyGroup.isEmpty { feedback = "Tout le front : \(armyGroup.count + 1) armées." }
+            return
+        }
         if a.owner == playerID {
             if selectedArmy == id {
                 selectedArmy = nil
@@ -389,7 +514,7 @@ final class GameStore: ObservableObject {
                 selectedCountry = nil
                 selectedProvince = nil
             }
-            refreshMap()
+            refreshSelection()
             return
         }
         if let current = selectedArmy, s.state.armies.first(where: { $0.id == current })?.owner == playerID,
@@ -401,7 +526,7 @@ final class GameStore: ObservableObject {
         armyGroup = []
         selectedCountry = nil
         selectedProvince = nil
-        refreshMap()
+        refreshSelection()
     }
 
     /// Ordre à l'armée sélectionnée et à tout son groupe.
@@ -446,7 +571,7 @@ final class GameStore: ObservableObject {
         guard let s = sim, let id = selectedArmy, let a = s.state.armies.first(where: { $0.id == id }), a.owner == playerID else { return }
         let around = Set(ProvinceMap.all[a.province].neighbors + [a.province])
         armyGroup = Set(s.state.armies.filter { $0.owner == a.owner && $0.id != id && around.contains($0.province) }.map { $0.id })
-        refreshMap()
+        refreshSelection()
     }
 
     /// Sélectionne toutes les armées du joueur placées sur le front.
@@ -454,12 +579,12 @@ final class GameStore: ObservableObject {
         guard let s = sim, let id = selectedArmy, let p = playerID else { return }
         let front = s.frontierProvinces(p, enemies: s.enemies(of: p))
         armyGroup = Set(s.state.armies.filter { $0.owner == p && $0.id != id && front.contains($0.province) }.map { $0.id })
-        refreshMap()
+        refreshSelection()
     }
 
     func clearGroup() {
         armyGroup = []
-        refreshMap()
+        refreshSelection()
     }
 
     /// Toucher la carte : sélectionne la région et affiche la fiche rapide de son propriétaire.
@@ -502,14 +627,14 @@ final class GameStore: ObservableObject {
                 } else {
                     selectedArmy = nil
                 }
-                refreshMap()
+                refreshSelection()
                 return
             }
             if !here.isEmpty && s.state.armies.first(where: { $0.id == armyID })?.path.isEmpty == true
                 && !(s.enemies(of: playerID ?? "").contains(s.controller(of: province.id))) {
                 // On touche une autre armée à nous : on la sélectionne.
                 selectedArmy = here[0].id
-                refreshMap()
+                refreshSelection()
                 return
             }
             orderSelected(to: province.id)
@@ -519,13 +644,13 @@ final class GameStore: ObservableObject {
             selectedArmy = first.id
             selectedCountry = nil
             selectedProvince = nil
-            refreshMap()
+            refreshSelection()
             return
         }
         selectedProvince = province.id
         let owner = s.provinceOwners()[province.id]?.owner
         selectedCountry = owner ?? province.country
-        refreshMap()
+        refreshSelection()
     }
 
     func clearSelection() {
@@ -535,7 +660,7 @@ final class GameStore: ObservableObject {
         selectedArmy = nil
         armyGroup = []
         waypointLocked = false
-        refreshMap()
+        refreshSelection()
     }
 
     func selectArmy(_ id: Int) {
@@ -548,7 +673,7 @@ final class GameStore: ObservableObject {
         let b = ProvinceMap.all[a.province].bounds
         focusCounter += 1
         focus = MapFocus(id: focusCounter, rect: b.insetBy(dx: -b.size.width * 3 - 300_000, dy: -b.size.height * 3 - 300_000))
-        refreshMap()
+        refreshSelection()
     }
 
     /// Centre la carte sur un pays (ses régions actuelles).
@@ -602,6 +727,7 @@ final class GameStore: ObservableObject {
     func load() {
         do {
             let data = try Data(contentsOf: saveURL)
+            mutationCount += 1
             sim = try Simulation(saveData: data)
             lastSeenEventID = (sim?.state.nextEventID ?? 1) - 1
             speed = 0

@@ -32,9 +32,14 @@ struct UnitToken: Equatable, Identifiable {
     let onBorder: Bool
 
     static func == (l: UnitToken, r: UnitToken) -> Bool {
-        l.id == r.id && l.point.x == r.point.x && l.point.y == r.point.y && l.count == r.count && l.selected == r.selected
-            && l.engaged == r.engaged && l.moving == r.moving && l.training == r.training && l.mainType == r.mainType
-            && l.serving == r.serving && l.onBorder == r.onBorder && l.mix == r.mix
+        l.point.x == r.point.x && l.point.y == r.point.y && l.looksSame(as: r)
+    }
+
+    /// Même apparence (la position mise à part) : le pion n'a pas besoin d'être redessiné.
+    func looksSame(as r: UnitToken) -> Bool {
+        id == r.id && count == r.count && selected == r.selected && engaged == r.engaged && moving == r.moving
+            && training == r.training && mainType == r.mainType && serving == r.serving && onBorder == r.onBorder
+            && mix == r.mix && isPlayer == r.isPlayer
     }
 }
 
@@ -68,22 +73,28 @@ struct UnitsSnapshot: Equatable {
     var routes: [UnitRoute] = []
     var battles: [BattleBadge] = []
     var bombed: [Int] = []
+    var selectedProvince: Int?          // région touchée (contour doré)
+    var highlight: [Int] = []           // régions où l'on peut construire
 
     static let empty = UnitsSnapshot()
 }
 
 // MARK: - Points d'ancrage (centre de région, ou frontière)
 
-final class Anchors {
+final class Anchors: @unchecked Sendable {
     static let shared = Anchors()
     private var cache: [Int: MKMapPoint] = [:]
+    private let lock = NSLock()      // utilisé depuis le calcul en arrière-plan et depuis l'interface
 
     func center(_ p: Int) -> MKMapPoint { ProvinceMap.all[p].labelPoint }
 
     /// Point sur la frontière entre deux régions voisines, légèrement du côté de `a`.
     func border(_ a: Int, _ b: Int) -> MKMapPoint {
         let key = a * 100_000 + b
-        if let p = cache[key] { return p }
+        lock.lock()
+        let cached = cache[key]
+        lock.unlock()
+        if let p = cached { return p }
         var best: [MKMapPoint] = []
         // Les frontières sont rangées sans ordre : on cherche (a, b) ou (b, a).
         if let list = Anchors.borderIndex[min(a, b) * 100_000 + max(a, b)] {
@@ -101,7 +112,9 @@ final class Anchors {
             // On recule vers l'intérieur de la région (22 %) pour rester de notre côté de la ligne.
             point = MKMapPoint(x: mid.x + (c.x - mid.x) * 0.22, y: mid.y + (c.y - mid.y) * 0.22)
         }
+        lock.lock()
         cache[key] = point
+        lock.unlock()
         return point
     }
 
