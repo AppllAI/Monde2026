@@ -334,6 +334,13 @@ struct NoticeStack: View {
                 .glass(16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            if let id = store.reportNotice, let r = store.sim?.state.reports.first(where: { $0.id == id }) {
+                ReportNotice(report: r) {
+                    store.reportNotice = nil
+                    store.open(.report(r.id))
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
             if let message = store.feedback {
                 Text(message).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink)
                     .padding(.horizontal, 14).padding(.vertical, 10)
@@ -345,6 +352,7 @@ struct NoticeStack: View {
         .sensoryFeedback(.warning, trigger: store.toasts.count)
         .animation(.snappy, value: store.toasts.map { $0.id })
         .animation(.snappy, value: store.feedback)
+        .animation(.snappy, value: store.reportNotice)
     }
 }
 
@@ -424,6 +432,7 @@ struct PanelHost: View {
                 case .battle(let province): BattlePanel(store: store, province: province)
                 case .army(let id): ArmyOrganizer(store: store, armyID: id)
                 case .diplo(let c, let a): DiploActionPanel(store: store, target: c, action: a)
+                case .report(let id): BattleReportPanel(store: store, reportID: id)
                 }
                 }
                 .id(panel)

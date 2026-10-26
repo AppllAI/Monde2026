@@ -240,6 +240,97 @@ struct Battle: Codable, Identifiable {
     var daysLeftInPhase: Int { max(0, 4 - (lastDay - phaseStart)) }
 }
 
+/// Rapport après bataille : qui a gagné, à quel prix, pourquoi, et un conseil.
+struct BattleReport: Codable, Identifiable {
+    let id: Int
+    let province: Int
+    let day: Int
+    let days: Int
+    let attacker: CountryID
+    let defender: CountryID
+    let attackerWon: Bool
+    let breakthrough: Bool
+    let attackerLosses: Double      // milliers d'hommes
+    let defenderLosses: Double
+    let attackerDivisions: Int
+    let defenderDivisions: Int
+    let reasons: [BattleModifier]   // facteurs décisifs, exprimés pour l'attaquant (> 1 : l'aide)
+    let advice: String
+    let playerSide: Int             // 1 le joueur attaquait, -1 il défendait
+}
+
+extension Battle {
+    /// Les facteurs qui ont le plus pesé, exprimés du point de vue de l'attaquant (> 1 : l'aide, < 1 : le gêne).
+    func decisiveFactors(_ n: Int = 3) -> [BattleModifier] {
+        var all: [BattleModifier] = attackMods
+        for m in defenseMods where !m.name.hasPrefix("Armées") {
+            all.append(BattleModifier(name: m.name, value: 1 / max(m.value, 0.01)))
+        }
+        // Le nombre compte toujours : plus de troupes, plus de force.
+        if attackerDivisions > 0 && defenderDivisions > 0 {
+            let ratio = Double(attackerDivisions) / Double(defenderDivisions)
+            if abs(ratio - 1) > 0.15 {
+                all.append(BattleModifier(name: ratio > 1 ? "Supériorité numérique" : "Infériorité numérique",
+                                          value: min(2.5, max(0.4, ratio.squareRoot()))))
+            }
+        }
+        return Array(all.sorted { abs(Foundation.log($0.value)) > abs(Foundation.log($1.value)) }.prefix(n))
+    }
+}
+
+enum BattleAdvice {
+    /// Icône d'un facteur (pour le « pourquoi » en 3 images).
+    static func icon(_ name: String) -> String {
+        let n = name.lowercased()
+        if n.contains("terrain") { return "mountain.2.fill" }
+        if n.contains("fleuve") { return "water.waves" }
+        if n.contains("débarquement") { return "ferry.fill" }
+        if n.contains("météo") { return "cloud.snow.fill" }
+        if n.contains("ravitaillement") { return "shippingbox.fill" }
+        if n.contains("généra") { return "star.fill" }
+        if n.contains("posture") { return "flame.fill" }
+        if n.contains("côtés") { return "arrow.triangle.merge" }
+        if n.contains("ciel") || n.contains("aérienne") { return "airplane" }
+        if n.contains("tactique") { return "brain.head.profile" }
+        if n.contains("sa terre") { return "house.fill" }
+        if n.contains("ligne tenue") { return "shield.lefthalf.filled" }
+        if n.contains("ville") { return "building.2.fill" }
+        if n.contains("fort") { return "building.columns.fill" }
+        if n.contains("bombes") { return "burst.fill" }
+        if n.contains("numérique") { return "person.3.fill" }
+        return "chart.bar.fill"
+    }
+
+    /// Un conseil simple, tiré du facteur qui a le plus gêné le perdant.
+    static func advice(attackerWon: Bool, playerAttacked: Bool, breakthrough: Bool, factors: [BattleModifier]) -> String {
+        if attackerWon && playerAttacked {
+            return breakthrough ? "Percée ! Avancez tout de suite plus loin, avant que l'ennemi ne reforme sa ligne."
+                                : "Région prise. Laissez souffler vos troupes (moral) avant la prochaine attaque."
+        }
+        if !attackerWon && !playerAttacked {
+            return "La ligne tient. Contre-attaquez quand le moral ennemi est au plus bas."
+        }
+        if attackerWon && !playerAttacked {
+            let worst = factors.first { $0.value > 1 }?.name.lowercased() ?? ""
+            if worst.contains("côtés") { return "Vous avez été pris en tenaille : tenez les frontières menacées avec des armées plaquées." }
+            if worst.contains("numérique") { return "Trop peu de troupes : regroupez des armées ici ou reculez sur une ligne plus courte." }
+            return "Plaquez des armées contre la frontière menacée et construisez un fort pour la prochaine fois."
+        }
+        // Le joueur attaquait et a été repoussé : ce qui l'a le plus gêné.
+        let worst = factors.first { $0.value < 1 }?.name.lowercased() ?? ""
+        if worst.contains("fort") { return "Bombardez le fort avant d'attaquer, ou contournez-le." }
+        if worst.contains("fleuve") { return "Ne traversez pas le fleuve de face : attaquez depuis l'autre rive ou avec des marines." }
+        if worst.contains("terrain") { return "Terrain défavorable : passez par la plaine, ou choisissez l'infiltration." }
+        if worst.contains("tactique") { return "Votre tactique était contrée : choisissez-en une qui bat celle de l'ennemi." }
+        if worst.contains("ravitaillement") { return "Vos troupes manquaient de tout : construisez une base plus près du front." }
+        if worst.contains("ciel") { return "L'ennemi tient le ciel : demandez des frappes avant l'assaut." }
+        if worst.contains("météo") { return "Attendez la fin de l'hiver ou de la boue pour attaquer." }
+        if worst.contains("sa terre") || worst.contains("ville") { return "Il défend chez lui : encerclez la région plutôt que l'attaquer de face." }
+        if worst.contains("numérique") { return "Trop peu de troupes : rassemblez plus de divisions avant d'attaquer." }
+        return "Attaquez de plusieurs côtés à la fois (tenaille) et avec plus de divisions."
+    }
+}
+
 // MARK: - Noms des généraux
 
 enum GeneralNames {
@@ -734,6 +825,15 @@ extension Simulation {
             for i in attackers { state.armies[i].general.xp += 4 }
             captureProvince(target, by: attackers, defenders: defenders, from: defenderCountry)
             state.battles[target] = nil
+            // Percée : une victoire nette laisse les vainqueurs pousser plus loin, sans s'arrêter.
+            let breakthrough = battle.balance >= 0.66
+            if breakthrough {
+                for i in attackers where state.armies.indices.contains(i) {
+                    state.armies[i].organization = min(1, state.armies[i].organization + 0.15)
+                    if !state.armies[i].path.isEmpty { state.armies[i].progress = 0.4 }
+                }
+            }
+            recordReport(battle, attackerWon: true, breakthrough: breakthrough)
             if let p = state.playerID, involved.contains(p) || attArmies.contains(where: { isFriendly(p, $0.owner) }) {
                 let days = today - battle.startDay + 1
                 addEvent("⚔️ Bataille de \(ProvinceMap.all[target].name) (\(days) j) : victoire de \(name(leadOwner)). Pertes : \(Int(battle.attackerLosses)) k contre \(Int(battle.defenderLosses)) k.",
@@ -747,6 +847,7 @@ extension Simulation {
             }
             for j in defenders { state.armies[j].general.xp += 4 }
             state.battles[target] = nil
+            recordReport(battle, attackerWon: false, breakthrough: false)
             if attackers.contains(where: { state.armies[$0].owner == state.playerID }) {
                 // Pourquoi on a perdu : ce qui a le plus aidé la défense ou gêné l'attaque.
                 let why = (defMods.filter { $0.value > 1.05 }.map { ($0.name, $0.value - 1) }
@@ -757,6 +858,27 @@ extension Simulation {
             } else if defenderCountry == state.playerID {
                 addEvent("🛡️ Nous tenons \(ProvinceMap.all[target].name) : l'assaut de \(name(leadOwner)) est brisé.", important: false)
             }
+        }
+    }
+
+    /// Garde un rapport des batailles où le joueur (ou ses troupes) était engagé.
+    mutating func recordReport(_ b: Battle, attackerWon: Bool, breakthrough: Bool) {
+        let side = playerSide(in: b)
+        guard side != 0 else { return }
+        let factors = b.decisiveFactors()
+        let report = BattleReport(id: state.nextReportID, province: b.province, day: state.day, days: state.day - b.startDay + 1,
+                                  attacker: b.attacker, defender: b.defender, attackerWon: attackerWon,
+                                  breakthrough: breakthrough, attackerLosses: b.attackerLosses, defenderLosses: b.defenderLosses,
+                                  attackerDivisions: b.attackerDivisions, defenderDivisions: b.defenderDivisions,
+                                  reasons: factors,
+                                  advice: BattleAdvice.advice(attackerWon: attackerWon, playerAttacked: side == 1,
+                                                              breakthrough: breakthrough, factors: factors),
+                                  playerSide: side)
+        state.nextReportID += 1
+        state.reports.append(report)
+        if state.reports.count > 30 { state.reports.removeFirst(state.reports.count - 30) }
+        if breakthrough && side == 1 {
+            addEvent("💥 Percée à \(ProvinceMap.all[b.province].name) : nos troupes exploitent la brèche.", important: false)
         }
     }
 

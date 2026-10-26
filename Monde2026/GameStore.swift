@@ -14,6 +14,7 @@ enum Panel: Identifiable, Hashable {
     case battle(Int)
     case army(Int)
     case diplo(CountryID, DiploAction)
+    case report(Int)
 
     var id: String {
         switch self {
@@ -31,6 +32,7 @@ enum Panel: Identifiable, Hashable {
         case .battle(let p): return "battle-\(p)"
         case .army(let a): return "army-\(a)"
         case .diplo(let c, let a): return "diplo-\(c)-\(a.rawValue)"
+        case .report(let r): return "report-\(r)"
         }
     }
 
@@ -163,6 +165,9 @@ final class GameStore: ObservableObject {
     @Published var toasts: [GameEvent] = []
     @Published var feedback: String?
     @Published var autoPause = false
+    /// Dernier rapport de bataille (une carte s'affiche quelques secondes pour l'ouvrir).
+    @Published var reportNotice: Int?
+    private var lastReportID = 0
 
     private var lastSeenEventID = 0
     private var loop: Task<Void, Never>?
@@ -177,6 +182,7 @@ final class GameStore: ObservableObject {
         mutationCount += 1
         sim = Simulation(playerID: id, difficulty: difficulty)
         lastSeenEventID = (sim?.state.nextEventID ?? 1) - 1
+        lastReportID = sim?.state.reports.last?.id ?? 0
         speed = 0
         panel = nil
         toasts = []
@@ -286,6 +292,15 @@ final class GameStore: ObservableObject {
             if kept != armyGroup { armyGroup = kept }
         }
         collectEvents()
+        if let last = sim!.state.reports.last, last.id > lastReportID {
+            lastReportID = last.id
+            reportNotice = last.id
+            let id = last.id
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                if self?.reportNotice == id { self?.reportNotice = nil }
+            }
+        }
         presentUrgent()
         if let unlocked = sim?.state.achievements, unlocked.count != achievementCount {
             achievementCount = unlocked.count
@@ -730,6 +745,7 @@ final class GameStore: ObservableObject {
             mutationCount += 1
             sim = try Simulation(saveData: data)
             lastSeenEventID = (sim?.state.nextEventID ?? 1) - 1
+            lastReportID = sim?.state.reports.last?.id ?? 0
             speed = 0
             version += 1
             refreshMap()

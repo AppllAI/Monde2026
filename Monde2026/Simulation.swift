@@ -76,6 +76,8 @@ struct GameState: Codable {
     var covertAid: [CovertAid] = []                     // aides secrètes en cours
     var bombardments: [Int: Bombardment] = [:]          // régions sous les bombes
     var nextPlanID = 1
+    var reports: [BattleReport] = []                    // rapports après bataille (les plus récents)
+    var nextReportID = 1
 }
 
 struct Simulation {

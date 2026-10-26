@@ -114,6 +114,11 @@ jobs:
           xcrun simctl io "$UDID" screenshot /tmp/out/7-bataille.png
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 120 -openreport
+          sleep 30
+          xcrun simctl io "$UDID" screenshot /tmp/out/12-rapport.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
 
           # 4. Une partie en accéléré
           (xcrun simctl launch --console-pty "$UDID" $BUNDLE -autostart FRA -speed 3 -perf > game.log 2>&1 &)

@@ -396,14 +396,29 @@ struct BattlePanel: View {
         }
         .padding(14)
         .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        // 2. Les deux camps face à face
-        HStack(alignment: .top, spacing: 10) {
-            SideCard(title: "Attaque", id: b.attacker, name: sim.name(b.attacker), general: b.attackerGeneral,
-                     divisions: b.attackerDivisions, org: b.attackerOrg, losses: b.attackerLosses,
-                     power: b.attack, isPlayer: side == 1, tactic: b.attackerTactic)
-            SideCard(title: "Défense", id: b.defender, name: sim.name(b.defender), general: b.defenderGeneral,
-                     divisions: b.defenderDivisions, org: b.defenderOrg, losses: b.defenderLosses,
-                     power: b.defense, isPlayer: side == -1, tactic: b.defenderTactic)
+        // 2. L'arène : les deux camps face à face, le duel des tactiques, la corde du rapport de force
+        let forces = sim.battleForces(b)
+        BattleArena(battle: b, attack: forces.attack, defense: forces.defense, side: side,
+                    attackerName: sim.name(b.attacker), defenderName: sim.name(b.defender))
+        // 2b. Pourquoi, en 3 images
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ce qui pèse le plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
+            WhyStrip(factors: b.decisiveFactors(), side: side)
+        }
+        // 2c. La tactique de la prochaine phase (si c'est nous qui menons ce camp)
+        if let options = playerTactics(sim, b, side: side), !options.isEmpty {
+            let opponent = side == 1 ? b.defenderTactic : b.attackerTactic
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Votre tactique (prochaine phase dans \(b.daysLeftInPhase) j)")
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    ForEach(options) { t in
+                        TacticChoice(tactic: t, selected: b.playerPick == t, beatsCurrent: t.beats.contains(opponent)) {
+                            store.perform { s, _ in s.pickTactic(t, at: province) }
+                        }
+                    }
+                }
+            }
         }
         // 3. Ce que le joueur peut faire
         if side != 0 {
@@ -423,7 +438,7 @@ struct BattlePanel: View {
         // 4. Le détail, pour qui veut comprendre
         Button { withAnimation(.snappy) { details.toggle() } } label: {
             HStack {
-                Text("Pourquoi ce rapport de force ?").font(.system(size: 13, weight: .semibold))
+                Text("Tout le détail des calculs").font(.system(size: 13, weight: .semibold))
                 Spacer()
                 Image(systemName: details ? "chevron.up" : "chevron.down")
             }
@@ -445,6 +460,21 @@ struct BattlePanel: View {
                 }
             }
         }
+    }
+
+    /// Tactiques que le joueur peut choisir (seulement s'il mène l'attaque ou la défense).
+    private func playerTactics(_ sim: Simulation, _ b: Battle, side: Int) -> [Tactic]? {
+        guard let p = sim.state.playerID else { return nil }
+        if side == 1 && b.attacker == p {
+            let armies = sim.state.armies.filter { $0.side == p && $0.engaged && $0.path.first == province }
+            let fronts = Set(armies.map { $0.province }).count
+            return sim.availableTactics(attacking: true, armies: armies, owner: p, province: province, fronts: fronts)
+        }
+        if side == -1 && b.defender == p {
+            let armies = sim.state.armies.filter { $0.province == province && $0.side == p }
+            return sim.availableTactics(attacking: false, armies: armies, owner: p, province: province, fronts: b.fronts.count)
+        }
+        return nil
     }
 
     private func explanation(_ b: Battle) -> String {
