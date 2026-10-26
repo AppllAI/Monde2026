@@ -139,13 +139,17 @@ struct ResourceChip: View {
     let label: String
     var tint: Color = Theme.amber
     var warn = false
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             IconTile(icon: icon, tint: warn ? Theme.coral : tint, size: 28)
             VStack(alignment: .leading, spacing: -1) {
                 Text(value).font(Theme.data(14, weight: .bold)).foregroundStyle(warn ? Theme.coral : Theme.paper).lineLimit(1)
-                Text(label.uppercased()).font(Theme.label(9)).tracking(0.8).foregroundStyle(Theme.steel).lineLimit(1)
+                    .fixedSize()
+                if !compact {
+                    Text(label.uppercased()).font(Theme.label(9)).tracking(0.8).foregroundStyle(Theme.steel).lineLimit(1).fixedSize()
+                }
             }
         }
     }

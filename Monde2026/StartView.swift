@@ -150,7 +150,8 @@ struct StartView: View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
                 ForEach(visible) { c in
-                    CountryCard(country: c, selected: chosen == c.id, atWar: c.id == "UKR" || c.id == "RUS")
+                    CountryCard(country: c, selected: chosen == c.id, atWar: c.id == "UKR" || c.id == "RUS",
+                                rank: catalog.firstIndex(where: { $0.id == c.id }) ?? 0)
                         .onTapGesture { chosen = c.id }
                 }
             }
@@ -196,6 +197,7 @@ struct CountryCard: View {
     let country: Country
     let selected: Bool
     let atWar: Bool
+    var rank = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -209,7 +211,7 @@ struct CountryCard: View {
                     if atWar {
                         Label("EN GUERRE", systemImage: "flame.fill").font(Theme.label(10)).foregroundStyle(Theme.coral)
                     } else {
-                        Text(country.government.name.uppercased()).font(Theme.label(10)).tracking(0.6).foregroundStyle(Theme.steel)
+                        Text("PUISSANCE N° \(rank + 1)").font(Theme.label(10)).tracking(0.6).foregroundStyle(Theme.steel)
                     }
                 }
                 Spacer(minLength: 0)

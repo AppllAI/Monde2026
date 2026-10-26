@@ -23,7 +23,7 @@ struct GameView: View {
                 MapHost(feed: store.feed, store: store, satellite: store.satellite, focus: store.focus)
                     .ignoresSafeArea()
                 VStack(spacing: 10) {
-                    TopBar(store: store, wide: wide)
+                    TopBar(store: store, wide: wide, roomy: geo.size.width > 1050)
                     HStack(alignment: .top, spacing: 10) {
                         if wide && store.selectedCountry != nil && store.selectedArmy == nil && store.placing == nil {
                             CountrySidebar(store: store)

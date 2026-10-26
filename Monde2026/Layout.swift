@@ -17,6 +17,7 @@ import SwiftUI
 struct TopBar: View {
     @ObservedObject var store: GameStore
     let wide: Bool
+    var roomy = true          // assez de place pour les libellés (iPad en paysage)
 
     var body: some View {
         if let sim = store.sim, let player = store.player {
@@ -30,21 +31,30 @@ struct TopBar: View {
                             .overlay(HUDShape(cut: 8).strokeBorder(Theme.amber.opacity(0.7), lineWidth: 1.2))
                         VStack(alignment: .leading, spacing: 0) {
                             Text(player.name.uppercased()).font(Theme.title(17)).tracking(0.6).foregroundStyle(Theme.paper).lineLimit(1)
+                                .minimumScaleFactor(0.7)
                             Text(sim.dateString).font(Theme.data(12, weight: .semibold)).foregroundStyle(Theme.amber)
+                                .lineLimit(1).fixedSize()
                         }
+                        .layoutPriority(2)
                     }
                 }
                 .buttonStyle(Pressable())
                 if wide {
                     Rectangle().fill(Theme.edge).frame(width: 1, height: 30)
                     ResourceChip(icon: "banknote.fill", value: Fmt.money(sim.effectiveGDP(player.id)), label: "PIB",
-                                 tint: Theme.amber, warn: player.growth < 0)
+                                 tint: Theme.amber, warn: player.growth < 0, compact: !roomy)
                     ResourceChip(icon: "person.3.fill", value: Fmt.pct(player.stability, 0), label: "Stabilité",
-                                 tint: Theme.teal, warn: player.stability < 0.35)
-                    ResourceChip(icon: "shield.lefthalf.filled", value: "\(player.divisionCount)", label: "Divisions", tint: Theme.sky)
-                    ResourceChip(icon: "sparkles", value: "\(Int(player.influence))", label: "Influence", tint: Theme.violet)
+                                 tint: Theme.teal, warn: player.stability < 0.35, compact: !roomy)
+                    ResourceChip(icon: "shield.lefthalf.filled", value: "\(player.divisionCount)", label: "Divisions", tint: Theme.sky, compact: !roomy)
+                    if roomy {
+                        ResourceChip(icon: "sparkles", value: "\(Int(player.influence))", label: "Influence", tint: Theme.violet)
+                    }
                     if atWar {
-                        ResourceChip(icon: "flame.fill", value: "Guerre", label: "État", tint: Theme.coral, warn: true)
+                        if roomy {
+                            ResourceChip(icon: "flame.fill", value: "Guerre", label: "État", tint: Theme.coral, warn: true)
+                        } else {
+                            IconTile(icon: "flame.fill", tint: Theme.coral, size: 28)
+                        }
                     }
                 }
                 Spacer(minLength: 4)
@@ -54,7 +64,7 @@ struct TopBar: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: store.mapMode.icon).font(.system(size: 13, weight: .bold))
-                        if wide { Text("CARTE").font(Theme.label(13)).tracking(0.8) }
+                        if roomy { Text("CARTE").font(Theme.label(13)).tracking(0.8).fixedSize() }
                     }
                     .foregroundStyle(store.mapTray ? Theme.ink : Theme.paper)
                     .padding(.horizontal, 12).frame(height: 36)

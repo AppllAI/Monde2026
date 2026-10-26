@@ -716,7 +716,7 @@ final class UnitTokenView: UIView {
         let flag = token.flag as NSString
         let fAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 15)]
         let fs = flag.size(withAttributes: fAttrs)
-        flag.draw(at: CGPoint(x: r.minX + 14 - fs.width / 2, y: r.midY - fs.height / 2), withAttributes: fAttrs)
+        flag.draw(at: CGPoint(x: r.minX + 14 - fs.width / 2, y: r.midY - fs.height / 2 - (token.rank > 0 ? 2.5 : 0)), withAttributes: fAttrs)
         // Pictogramme du type dominant
         UnitArt.draw(token.mainType, in: CGRect(x: r.minX + 33, y: r.minY + 7, width: 26, height: 16), context: ctx)
         // Effectif
@@ -727,15 +727,18 @@ final class UnitTokenView: UIView {
         ]
         let cs = count.size(withAttributes: cAttrs)
         count.draw(at: CGPoint(x: r.maxX - 7 - cs.width, y: r.midY - cs.height / 2 - 1.5), withAttributes: cAttrs)
-        // Galons d'expérience (chevrons dorés) au-dessus du pictogramme
+        // Galons d'expérience : petits chevrons dorés en bas de la bande du pays, sous le drapeau
         if token.rank > 0 {
             ctx.setStrokeColor(UIColor(Theme.amber).cgColor)
-            ctx.setLineWidth(1.4)
-            for k in 0..<token.rank {
-                let y0 = r.minY + 3.5 + CGFloat(k) * 2.6
-                ctx.move(to: CGPoint(x: r.minX + 41, y: y0 + 2))
-                ctx.addLine(to: CGPoint(x: r.minX + 46, y: y0))
-                ctx.addLine(to: CGPoint(x: r.minX + 51, y: y0 + 2))
+            ctx.setLineWidth(1.5)
+            let w: CGFloat = 6, gap: CGFloat = 1.5
+            let total = CGFloat(token.rank) * w + CGFloat(token.rank - 1) * gap
+            var cx = r.minX + 14 - total / 2
+            for _ in 0..<token.rank {
+                ctx.move(to: CGPoint(x: cx, y: r.maxY - 3))
+                ctx.addLine(to: CGPoint(x: cx + w / 2, y: r.maxY - 6))
+                ctx.addLine(to: CGPoint(x: cx + w, y: r.maxY - 3))
+                cx += w + gap
             }
             ctx.strokePath()
         }
