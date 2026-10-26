@@ -300,7 +300,9 @@ extension Simulation {
 
     func relation(_ a: CountryID, _ b: CountryID) -> Double {
         if a == b { return 100 }
-        return state.relations[Simulation.pairKey(a, b)] ?? structuralRelation(a, b)
+        let key = Simulation.pairKey(a, b)
+        if let v = state.relations[key] { return v }
+        return relCache.structural(key, key: relationKey()) { structuralRelation(a, b) }
     }
 
     mutating func setRelation(_ a: CountryID, _ b: CountryID, _ value: Double) {

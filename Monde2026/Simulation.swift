@@ -91,6 +91,7 @@ final class RelationCache: @unchecked Sendable {
     private var key: [Int] = []
     private var enemies: [CountryID: Set<CountryID>] = [:]
     private var allies: [CountryID: Set<CountryID>] = [:]
+    private var structural: [String: Double] = [:]
     private var controlKey = -1
     private var controlled: [CountryID: [Int]] = [:]
     private var troopsKey = -1
@@ -104,12 +105,13 @@ final class RelationCache: @unchecked Sendable {
         key = []
         enemies = [:]
         allies = [:]
+        structural = [:]
         lock.unlock()
     }
 
     private func camp(_ id: CountryID, key k: [Int], enemies wantEnemies: Bool, compute: () -> Set<CountryID>) -> Set<CountryID> {
         lock.lock()
-        if k != key { key = k; enemies = [:]; allies = [:] }
+        if k != key { key = k; enemies = [:]; allies = [:]; structural = [:] }
         if let c = wantEnemies ? enemies[id] : allies[id] { lock.unlock(); return c }
         lock.unlock()
         let r = compute()
@@ -125,6 +127,19 @@ final class RelationCache: @unchecked Sendable {
 
     func allies(_ id: CountryID, key k: [Int], compute: () -> Set<CountryID>) -> Set<CountryID> {
         camp(id, key: k, enemies: false, compute: compute)
+    }
+
+    /// Relation « structurelle » d'une paire de pays (traités, blocs, guerres, régimes).
+    func structural(_ pair: String, key k: [Int], compute: () -> Double) -> Double {
+        lock.lock()
+        if k != key { key = k; enemies = [:]; allies = [:]; structural = [:] }
+        if let v = structural[pair] { lock.unlock(); return v }
+        lock.unlock()
+        let r = compute()
+        lock.lock()
+        if k == key { structural[pair] = r }
+        lock.unlock()
+        return r
     }
 
     func controlled(key k: Int, compute: () -> [CountryID: [Int]]) -> [CountryID: [Int]] {
@@ -174,7 +189,8 @@ struct Simulation {
         }
         var members = 0
         for b in state.blocs { members += b.members.count }
-        return [state.day, state.wars.count, active, sides, state.treaties.count, state.nextTreatyID, state.blocs.count, members]
+        return [state.day, state.wars.count, active, sides, state.treaties.count, state.nextTreatyID, state.blocs.count, members,
+                state.claims.count]
     }
 
     /// Régions tenues par chaque pays (recalculé seulement quand une région change de mains).
