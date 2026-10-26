@@ -110,12 +110,12 @@ jobs:
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
           xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 20 -openbattle
-          sleep 25
+          sleep 40
           xcrun simctl io "$UDID" screenshot /tmp/out/7-bataille.png
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
           xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 30 -openreport
-          sleep 30
+          sleep 50
           xcrun simctl io "$UDID" screenshot /tmp/out/12-rapport.png
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
