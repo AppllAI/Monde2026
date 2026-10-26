@@ -69,6 +69,31 @@ enum SelfTest {
             log("   RUS \(ru.count) armées / \(ruDiv) div / org \(Int(ruOrg * 100)) % ; UKR \(ua.count) armées / \(uaDiv) div / org \(Int(uaOrg * 100)) % ; garnison UKR \(probe.unassignedCount("UKR")) ; front UKR \(covered)/\(uaFront.count) régions tenues par une armée")
         }
 
+        // Profil : où part le temps de calcul d'un jour (90 jours en guerre).
+        var prof = probe
+        var times: [String: Double] = [:]
+        let tp = Date()
+        for _ in 0..<90 { prof.advanceDayProfiled(&times) }
+        let total = Date().timeIntervalSince(tp)
+        log("profil 90 j : \(String(format: "%.1f", total * 1000 / 90)) ms/jour — " + times.sorted { $0.value > $1.value }
+            .map { "\($0.key) \(String(format: "%.2f", $0.value * 1000 / 90))" }.joined(separator: ", "))
+        let tu = Date()
+        for _ in 0..<20 { _ = UnitsBuilder.build(prof, selectedArmy: nil, group: []) }
+        log("instantané des unités : \(String(format: "%.2f", Date().timeIntervalSince(tu) * 1000 / 20)) ms, carte : " +
+            "\(String(format: "%.1f", { () -> Double in let t = Date(); _ = MapSnapshotBuilder.build(prof, mode: .political, selected: nil, selectedProvince: nil); return Date().timeIntervalSince(t) * 1000 }())) ms")
+
+        // Lignes de front : l'Ukraine confie toutes ses armées au front.
+        var front = Simulation(playerID: "UKR", difficulty: .normal)
+        let uaIDs = front.armies(of: "UKR").map { $0.id }
+        log("front : " + front.assignFront(uaIDs, owner: "UKR").message)
+        front.advance(days: 12)
+        let line = front.frontierProvinces("UKR", enemies: front.enemies(of: "UKR"))
+        let held = line.filter { p in front.armies(of: "UKR").contains { $0.province == p } }.count
+        log("front : après 12 jours, \(held)/\(line.count) régions du front tenues, \(front.armies(of: "UKR").filter { $0.facing != nil }.count) armées plaquées")
+        if let a = front.armies(of: "UKR").first, let target = ProvinceMap.all[a.province].neighbors.first(where: { front.enemies(of: "UKR").contains(front.controller(of: $0)) }) {
+            log("flèche : " + front.arrowOffensive([a.id], along: [a.province, target]).message)
+        }
+
         let watched: [CountryID] = ["USA", "CHN", "FRA", "DEU", "RUS", "UKR", "IND", "BRA", "ARM", "SDN"]
         for year in 1...5 {
             let t = Date()

@@ -180,6 +180,28 @@ struct Simulation {
         }
     }
 
+    /// Même chose qu'`advanceDay`, en mesurant chaque étape (test de performance).
+    mutating func advanceDayProfiled(_ t: inout [String: Double]) {
+        func time(_ name: String, _ body: (inout Simulation) -> Void) {
+            let t0 = Date()
+            body(&self)
+            t[name, default: 0] += Date().timeIntervalSince(t0)
+        }
+        state.day += 1
+        time("militaire") { $0.dailyMilitary() }
+        time("armées") { $0.dailyArmies() }
+        if state.day % 2 == 0 { time("fronts") { $0.manageFronts() } }
+        time("entraînement") { $0.dailyTraining() }
+        time("chantiers") { $0.dailyConstruction() }
+        time("réserves") { $0.syncDepots() }
+        time("opérations") { $0.dailyOperations() }
+        time("guerre") { $0.dailyWar() }
+        time("nouvelles") { $0.scheduledNews() }
+        if Simulation.calendar.component(.day, from: currentDate) == 1 {
+            time("mois") { $0.monthlyTick() }
+        }
+    }
+
     mutating func advance(days: Int) {
         guard days > 0 else { return }
         for _ in 0..<days {

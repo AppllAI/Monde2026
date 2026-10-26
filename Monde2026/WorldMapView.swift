@@ -46,7 +46,7 @@ struct ProvinceFill: Equatable {
 }
 
 enum BorderKind: UInt8 {
-    case hidden, region, country, player, selected, front
+    case hidden, region, country, player, selected, front, hot   // hot : front où l'on se bat
 }
 
 struct MapLabel: Equatable, Identifiable {
@@ -182,9 +182,10 @@ enum MapSnapshotBuilder {
                 let holder = info.owner ?? p.country
                 fills.append(ProvinceFill(color: RGBA(color(holder)), stripes: RGBA(allyBlue, alpha: 0.95)))
             case .occupied:
+                // Territoire occupé : la couleur de l'occupant, plus claire, rayée de celle du pays d'origine.
                 let holder = info.owner ?? p.country
-                fills.append(ProvinceFill(color: RGBA(color(holder)),
-                                          stripes: RGBA(color(p.country), alpha: 0.85)))
+                fills.append(ProvinceFill(color: RGBA(color(holder).lighter(0.18)),
+                                          stripes: RGBA(color(p.country), alpha: 0.6)))
             case .core where mode == .terrain, .annexed where mode == .terrain:
                 let t = TerrainMap.terrain(p.id).rgb
                 fills.append(ProvinceFill(color: RGBA(UIColor(red: t.0, green: t.1, blue: t.2, alpha: 1)), stripes: nil))
@@ -220,7 +221,9 @@ enum MapSnapshotBuilder {
                 continue
             }
             if let a = oa, let b = ob, enemies(a).contains(b) {
-                borders.append(.front)
+                // Front actif (bataille d'un côté ou de l'autre) : ligne plus épaisse et plus vive.
+                let hot = sim.state.battles[border.a] != nil || sim.state.battles[border.b] != nil
+                borders.append(hot ? .hot : .front)
             } else if oa == nil || ob == nil {
                 borders.append(.front)        // front contre les rebelles
             } else if let s = selected, oa == s || ob == s {
@@ -654,6 +657,10 @@ final class ProvinceRenderer: MKOverlayRenderer {
         // Passe 4 : lignes de front (halo + trait).
         stroke(kinds, .front, among: visibleBorders, level: level, color: UIColor(Theme.coral).withAlphaComponent(0.30), width: 9 * px, context: context)
         stroke(kinds, .front, among: visibleBorders, level: level, color: UIColor(Theme.coral), width: 2.6 * px, context: context)
+        // Fronts où l'on se bat : halo large, trait épais, cœur clair.
+        stroke(kinds, .hot, among: visibleBorders, level: level, color: UIColor(red: 1, green: 0.35, blue: 0.2, alpha: 0.28), width: 18 * px, context: context)
+        stroke(kinds, .hot, among: visibleBorders, level: level, color: UIColor(Theme.coral), width: 4.5 * px, context: context)
+        stroke(kinds, .hot, among: visibleBorders, level: level, color: UIColor(red: 1, green: 0.85, blue: 0.6, alpha: 0.9), width: 1.2 * px, context: context)
 
         // 4. Troupes massées : flèches pointillées
         if !snap.plans.isEmpty {
