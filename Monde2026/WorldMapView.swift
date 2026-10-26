@@ -57,6 +57,9 @@ struct MapLabel: Equatable, Identifiable {
     let size: Double           // taille de police en points MapKit
     let isCountry: Bool
     let highlighted: Bool
+    var angle: Double = 0      // orientation (radians) : le nom suit l'allongement du pays
+    var span: Double = 0       // longueur sur laquelle s'étale le nom (points MapKit)
+    var bend: Double = 0       // courbure (fraction de la longueur)
 }
 
 struct PlanLine: Equatable, Identifiable {
@@ -284,9 +287,36 @@ enum MapSnapshotBuilder {
             let side = bestArea.squareRoot()
             let byArea = side * 0.20
             let byWidth = side * 1.5 / (0.62 * Double(max(4, name.count)))
-            let size = min(byArea, byWidth) * pointsPerKm
+            var size = min(byArea, byWidth) * pointsPerKm
+            // Allongement du territoire (analyse des axes principaux) : le nom suit le pays, légèrement courbé.
+            var sxx = 0.0, syy = 0.0, sxy = 0.0
+            for id in best {
+                let p = provinces[id].labelPoint, w = provinces[id].weight
+                let b = provinces[id].bounds
+                sxx += w * ((p.x - x) * (p.x - x) + b.size.width * b.size.width / 12)
+                syy += w * ((p.y - y) * (p.y - y) + b.size.height * b.size.height / 12)
+                sxy += w * (p.x - x) * (p.y - y)
+            }
+            sxx /= bestArea; syy /= bestArea; sxy /= bestArea
+            var angle = 0.5 * atan2(2 * sxy, sxx - syy)
+            let tr = sxx + syy, det = sxx * syy - sxy * sxy
+            let gap = max(0, tr * tr / 4 - det).squareRoot()
+            let major = (tr / 2 + gap).squareRoot(), minor = max(1, (tr / 2 - gap)).squareRoot()
+            var span = 0.0
+            if major / minor > 1.25 && best.count > 1 {
+                // On garde un sens de lecture confortable.
+                angle = max(-0.9, min(0.9, angle))
+                span = major * 3.0
+                let n = Double(max(3, name.count))
+                // Taille pour que le nom, espacé, couvre environ les trois quarts de la longueur.
+                let fit = span * 0.78 / (0.62 * n + 0.3 * (n - 1))
+                size = max(size, min(fit, minor * 1.6, size * 2.2))
+            } else {
+                angle = 0
+            }
             labels.append(MapLabel(id: "c-" + owner, text: name, x: x, y: y, size: size, isCountry: true,
-                                   highlighted: owner == player || owner == selected))
+                                   highlighted: owner == player || owner == selected,
+                                   angle: angle, span: span, bend: span > 0 ? 0.07 : 0))
         }
         // Noms des régions (visibles seulement de près)
         for p in provinces where p.weight > 2000 {
@@ -659,8 +689,9 @@ final class ProvinceRenderer: MKOverlayRenderer {
             } else {
                 guard screen >= 8.5, screen <= 34 else { continue }
             }
-            let halfWidth = label.size * 0.35 * Double(label.text.count) + label.size
-            let rect = MKMapRect(x: label.x - halfWidth, y: label.y - label.size, width: halfWidth * 2, height: label.size * 2)
+            let halfWidth = max(label.span / 2, label.size * 0.5 * Double(label.text.count)) + label.size
+            let halfHeight = label.angle == 0 ? label.size : halfWidth
+            let rect = MKMapRect(x: label.x - halfWidth, y: label.y - halfHeight, width: halfWidth * 2, height: halfHeight * 2)
             guard rect.intersects(mapRect) else { continue }
             drawLabel(label, context: context)
         }
@@ -935,6 +966,10 @@ final class ProvinceRenderer: MKOverlayRenderer {
             .strokeWidth: label.isCountry ? 9.0 : 4.0, .foregroundColor: UIColor.clear
         ]
         let fill: [NSAttributedString.Key: Any] = [.font: font, .kern: kern, .foregroundColor: textColor]
+        if label.isCountry && (label.span > 0 || label.text.count > 2) {
+            drawCurved(label, font: font, color: textColor, context: context)
+            return
+        }
         let text = label.text as NSString
         let size = text.size(withAttributes: fill)
         context.saveGState()
@@ -943,6 +978,49 @@ final class ProvinceRenderer: MKOverlayRenderer {
         let origin = CGPoint(x: -size.width / 2, y: -size.height / 2)
         text.draw(at: origin, withAttributes: outline)
         text.draw(at: origin, withAttributes: fill)
+        context.restoreGState()
+    }
+}
+
+extension ProvinceRenderer {
+    /// Nom de pays espacé, tourné selon l'allongement du territoire et légèrement courbé (lettre par lettre).
+    func drawCurved(_ label: MapLabel, font: UIFont, color: UIColor, context: CGContext) {
+        let base = font.pointSize
+        let letters = Array(label.text.uppercased())
+        let fill: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let outline: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.clear,
+                                                      .strokeColor: UIColor.black.withAlphaComponent(0.55), .strokeWidth: 7.0]
+        let widths = letters.map { (String($0) as NSString).size(withAttributes: fill).width }
+        let tracking = base * 0.30
+        let natural = widths.reduce(0, +) + tracking * CGFloat(max(0, letters.count - 1))
+        // Taille : celle prévue, sans dépasser la longueur du pays.
+        let wanted = label.span > 0 ? label.span * 0.8 : label.size * 0.62 * Double(max(3, letters.count)) * 1.15
+        let scale = min(CGFloat(label.size) / base, CGFloat(wanted) / max(1, natural))
+        let width = natural
+        let bend = CGFloat(label.bend) * width
+        context.saveGState()
+        context.translateBy(x: CGFloat(label.x), y: CGFloat(label.y))
+        context.rotate(by: CGFloat(label.angle))
+        context.scaleBy(x: scale, y: scale)
+        context.setAlpha(label.highlighted ? 1 : 0.86)
+        var x = -width / 2
+        for (i, ch) in letters.enumerated() {
+            let w = widths[i]
+            let cx = x + w / 2
+            let t = cx / max(1, width / 2)                     // -1 … 1
+            let y = -bend * (1 - t * t)                          // arche douce
+            let slope = 2 * bend * t / max(1, width / 2)         // pente de l'arche à cet endroit
+            context.saveGState()
+            context.translateBy(x: cx, y: y)
+            context.rotate(by: atan(slope))
+            let s = String(ch) as NSString
+            let h = font.lineHeight
+            let origin = CGPoint(x: -w / 2, y: -h / 2)
+            s.draw(at: origin, withAttributes: outline)
+            s.draw(at: origin, withAttributes: fill)
+            context.restoreGState()
+            x += w + tracking
+        }
         context.restoreGState()
     }
 }
