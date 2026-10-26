@@ -14,6 +14,7 @@ import SwiftUI
 
 struct ArmyCard: View {
     @ObservedObject var store: GameStore
+    @State private var showOps = false
 
     var body: some View {
         if let sim = store.sim, let id = store.selectedArmy, let a = sim.state.armies.first(where: { $0.id == id }) {
@@ -39,7 +40,6 @@ struct ArmyCard: View {
                         let ids = [id] + store.armyGroup.sorted()
                         store.mutate { $0.setStance(stance, for: ids) }
                     }
-                    OperationsRow(store: store, army: a, sim: sim)
                     if !store.armyGroup.isEmpty {
                         HStack {
                             Label("\(store.armyGroup.count + 1) armées ensemble", systemImage: "square.stack.3d.up.fill")
@@ -49,42 +49,53 @@ struct ArmyCard: View {
                                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.paper)
                         }
                     }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
+                    // Les 4 ordres principaux, gros et clairs ; le reste est rangé dans « Plus ».
+                    let onFront = sim.front(of: id) != nil
+                    HStack(spacing: 8) {
+                        BigOrder(title: onFront ? "Quitter le front" : "Tenir le front", icon: "rectangle.split.3x1.fill",
+                                 tint: onFront ? Theme.steel : Theme.teal) {
+                            if onFront { store.leaveFront() } else { store.holdFront() }
+                        }
+                        BigOrder(title: "Offensive", icon: "arrow.up.right", tint: Theme.coral) {
+                            store.feedback = "Appui long sur la carte, puis tracez une flèche vers l'ennemi."
+                        }
+                        BigOrder(title: a.training ? "Entraînement…" : "Base", icon: "star.square.fill", tint: Theme.amber) {
+                            if a.training {
+                                store.mutate { $0.setTraining(false, for: [id]) }
+                            } else {
+                                store.perform { s, _ in s.sendToBase(id) }
+                            }
+                        }
+                        Menu {
                             if !a.path.isEmpty {
-                                QuietButton(title: "Arrêter", icon: "stop.fill") {
+                                Button("Arrêter", systemImage: "stop.fill") {
                                     let ids = [id] + store.armyGroup.sorted()
                                     store.mutate { s in for x in ids { s.stopArmy(x) } }
                                 }
                             }
-                            QuietButton(title: a.training ? "À l'entraînement" : "Base & entraînement",
-                                        icon: "star.square", tint: a.training ? Theme.amber : Theme.paper) {
-                                if a.training {
-                                    store.mutate { $0.setTraining(false, for: [id]) }
-                                } else {
-                                    store.perform { s, _ in s.sendToBase(id) }
-                                }
-                            }
-                            QuietButton(title: "Réorganiser", icon: "arrow.left.arrow.right", tint: Theme.amber) { store.open(.army(id)) }
-                            QuietButton(title: "Armées voisines", icon: "plus.circle") { store.groupNearby() }
-                            QuietButton(title: "Tout le front", icon: "rectangle.3.group") { store.groupFront() }
-                            QuietButton(title: "Diviser", icon: "square.split.2x1") {
-                                store.perform { s, _ in s.splitArmy(id) }
-                            }
+                            Button("Réorganiser les divisions", systemImage: "arrow.left.arrow.right") { store.open(.army(id)) }
+                            Button("Ajouter les armées voisines", systemImage: "plus.circle") { store.groupNearby() }
+                            Button("Sélectionner tout le front", systemImage: "rectangle.3.group") { store.groupFront() }
+                            Button("Diviser en deux", systemImage: "square.split.2x1") { store.perform { s, _ in s.splitArmy(id) } }
                             if sim.playerArmies(in: a.province).count > 1 {
-                                QuietButton(title: "Fusionner ici", icon: "square.stack.3d.up") {
-                                    store.perform { s, _ in s.mergeArmies(at: id) }
-                                }
+                                Button("Fusionner ici", systemImage: "square.stack.3d.up") { store.perform { s, _ in s.mergeArmies(at: id) } }
                             }
-                            QuietButton(title: "Dissoudre", icon: "xmark.bin", tint: Theme.coral) {
+                            Button("Opérations spéciales…", systemImage: "scope") { withAnimation(.snappy) { showOps.toggle() } }
+                            Divider()
+                            Button("Dissoudre", systemImage: "xmark.bin", role: .destructive) {
                                 store.mutate { $0.dissolveArmy(id) }
                                 store.clearSelection()
                             }
+                        } label: {
+                            BigOrderLabel(title: "Plus", icon: "ellipsis", tint: Theme.paper)
                         }
+                    }
+                    if showOps {
+                        OperationsRow(store: store, army: a, sim: sim)
                     }
                     Text(store.waypointMode
                          ? "Mode étapes : chaque région touchée s'ajoute au trajet."
-                         : "Faites glisser le pion jusqu'à une région — contre une frontière pour la tenir. Ou touchez une région. ✋ à gauche : trajet par étapes.")
+                         : "Glissez le pion vers une région (contre une frontière pour la tenir). Appui long + trait : offensive. Double-tap : tout le front.")
                         .font(.system(size: 11)).foregroundStyle(store.waypointMode ? Theme.amber : Theme.steel).lineLimit(2)
                 } else {
                     GeneralRow(general: a.general)
@@ -129,6 +140,36 @@ struct ArmyCard: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Désélectionner l'armée")
         }
+    }
+}
+
+/// Gros bouton d'ordre (fiche d'armée) : facile à toucher du pouce.
+struct BigOrder: View {
+    let title: String
+    let icon: String
+    var tint: Color = Theme.amber
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) { BigOrderLabel(title: title, icon: icon, tint: tint) }
+            .buttonStyle(Pressable())
+    }
+}
+
+struct BigOrderLabel: View {
+    let title: String
+    let icon: String
+    var tint: Color = Theme.amber
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 17, weight: .semibold))
+            Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .foregroundStyle(tint)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(tint.opacity(0.25)))
     }
 }
 

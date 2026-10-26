@@ -457,8 +457,24 @@ final class GameStore: ObservableObject {
         sim?.previewOrder(army, to: province)
     }
 
-    /// Lasso : les pions entourés forment un groupe (le premier mène).
-    func lassoSelect(_ ids: [Int]) {
+    /// Trait dessiné au doigt (appui long puis glisser) : avec des armées sélectionnées et un trait qui
+    /// entre chez l'ennemi, c'est une flèche d'offensive ; sinon, un lasso qui sélectionne les pions entourés.
+    func handleStroke(enclosed ids: [Int], path: [GeoPoint]) {
+        if let lead = selectedArmy, sim?.state.armies.first(where: { $0.id == lead })?.owner == playerID,
+           let s = sim, let last = path.last, let end = ProvinceMap.province(at: last),
+           s.enemies(of: playerID ?? "").contains(s.controller(of: end.id)) {
+            var provinces: [Int] = []
+            for p in path {
+                guard let pr = ProvinceMap.province(at: p)?.id else { continue }
+                if provinces.last != pr && !provinces.contains(pr) { provinces.append(pr) }
+            }
+            let group = [lead] + armyGroup.sorted()
+            perform { sim, _ in sim.arrowOffensive(group, along: provinces) }
+            selectedArmy = nil
+            armyGroup = []
+            refreshUnits()
+            return
+        }
         guard let first = ids.first else { return }
         selectedArmy = first
         armyGroup = Set(ids.dropFirst())
@@ -466,6 +482,25 @@ final class GameStore: ObservableObject {
         selectedProvince = nil
         feedback = ids.count > 1 ? "\(ids.count) armées sélectionnées." : nil
         refreshSelection()
+    }
+
+    /// Confie l'armée sélectionnée (et son groupe) au front.
+    func holdFront() {
+        guard let lead = selectedArmy, let p = playerID else { return }
+        let ids = [lead] + armyGroup.sorted()
+        let r = perform { sim, _ in sim.assignFront(ids, owner: p) }
+        if r.success {
+            selectedArmy = nil
+            armyGroup = []
+            refreshUnits()
+        }
+    }
+
+    func leaveFront() {
+        guard let lead = selectedArmy else { return }
+        let ids = [lead] + armyGroup.sorted()
+        mutate { $0.leaveFront(ids) }
+        feedback = "Ces armées ne sont plus affectées au front."
     }
 
     func refreshMap(units: Bool = true) {

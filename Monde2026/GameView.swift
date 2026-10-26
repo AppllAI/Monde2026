@@ -132,7 +132,7 @@ struct MapHost: View {
                      onTap: { tap in store.handleTap(tap) },
                      onDrop: { id, province, facing in store.dropArmy(id, at: province, facing: facing) },
                      onPreview: { id, province in store.previewOrder(id, to: province) },
-                     onLasso: { ids in store.lassoSelect(ids) })
+                     onStroke: { ids, path in store.handleStroke(enclosed: ids, path: path) })
             .equatable()
     }
 }

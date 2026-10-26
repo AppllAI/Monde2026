@@ -65,7 +65,7 @@ final class UnitLayerView: UIView, UIGestureRecognizerDelegate {
     }
     var onDrop: ((Int, Int, Int?) -> Void)?           // armée, région, frontière tenue
     var onPreview: ((Int, Int) -> (path: [Int], days: Int, attack: Bool)?)?
-    var onLasso: (([Int]) -> Void)?
+    var onStroke: (([Int], [GeoPoint]) -> Void)?       // pions entourés, trait (lasso ou flèche d'offensive)
     private(set) var snapshot = UnitsSnapshot.empty
     private var tokens: [Int: UnitTokenView] = [:]
     private var badges: [Int: BattleBadgeView] = [:]
@@ -562,25 +562,48 @@ final class UnitLayerView: UIView, UIGestureRecognizerDelegate {
             let path = UIBezierPath()
             path.move(to: lassoPoints[0])
             for p in lassoPoints.dropFirst() { path.addLine(to: p) }
-            path.close()
+            if arrowMode {
+                // Des armées sont sélectionnées : le trait est une flèche d'offensive.
+                if lassoPoints.count >= 3 {
+                    let n = lassoPoints.count
+                    addHead(path, from: lassoPoints[max(0, n - 4)], to: lassoPoints[n - 1], size: 22)
+                }
+                lassoLayer.fillColor = nil
+                lassoLayer.strokeColor = UIColor(Theme.coral).cgColor
+                lassoLayer.lineWidth = 6
+                lassoLayer.lineCap = .round
+                lassoLayer.lineJoin = .round
+                lassoLayer.lineDashPattern = nil
+            } else {
+                path.close()
+                lassoLayer.fillColor = UIColor(Theme.amber).withAlphaComponent(0.12).cgColor
+                lassoLayer.strokeColor = UIColor(Theme.amber).cgColor
+                lassoLayer.lineWidth = 2
+                lassoLayer.lineDashPattern = [6, 4]
+            }
             lassoLayer.path = path.cgPath
         default:
             map.isScrollEnabled = true
             map.isZoomEnabled = true
             lassoLayer.path = nil
             defer { lassoPoints = [] }
-            guard g.state == .ended, lassoPoints.count > 6 else { return }
+            guard g.state == .ended, lassoPoints.count > 4 else { return }
             let shape = UIBezierPath()
             shape.move(to: lassoPoints[0])
             for p in lassoPoints.dropFirst() { shape.addLine(to: p) }
             shape.close()
             let picked = tokens.values.filter { !$0.isHidden && $0.token.isPlayer && shape.contains($0.center) }.map { $0.token.id }
-            if !picked.isEmpty {
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                onLasso?(picked.sorted())
+            let geo = lassoPoints.map { pt -> GeoPoint in
+                let c = map.convert(pt, toCoordinateFrom: self)
+                return GeoPoint(lat: c.latitude, lon: c.longitude)
             }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onStroke?(picked.sorted(), geo)
         }
     }
+
+    /// Une de nos armées est sélectionnée : le trait au doigt devient une flèche d'offensive.
+    private var arrowMode: Bool { snapshot.tokens.contains { $0.selected && $0.isPlayer } }
 }
 
 // MARK: - Le pion

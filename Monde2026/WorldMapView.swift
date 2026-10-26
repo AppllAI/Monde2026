@@ -418,7 +418,7 @@ struct WorldMapView: UIViewRepresentable, Equatable {
     let onTap: (MapTap) -> Void
     var onDrop: (Int, Int, Int?) -> Void = { _, _, _ in }
     var onPreview: (Int, Int) -> (path: [Int], days: Int, attack: Bool)? = { _, _ in nil }
-    var onLasso: ([Int]) -> Void = { _ in }
+    var onStroke: ([Int], [GeoPoint]) -> Void = { _, _ in }
 
     static func == (lhs: WorldMapView, rhs: WorldMapView) -> Bool {
         lhs.snapshot == rhs.snapshot && lhs.units == rhs.units && lhs.satellite == rhs.satellite && lhs.focus == rhs.focus
@@ -476,7 +476,7 @@ struct WorldMapView: UIViewRepresentable, Equatable {
         coordinator.apply(snapshot)
         coordinator.unitLayer?.onDrop = onDrop
         coordinator.unitLayer?.onPreview = onPreview
-        coordinator.unitLayer?.onLasso = onLasso
+        coordinator.unitLayer?.onStroke = onStroke
         coordinator.unitLayer?.apply(units, animated: unitAnimation)
     }
 }

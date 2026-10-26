@@ -76,6 +76,8 @@ struct GameState: Codable {
     var covertAid: [CovertAid] = []                     // aides secrètes en cours
     var bombardments: [Int: Bombardment] = [:]          // régions sous les bombes
     var nextPlanID = 1
+    var fronts: [FrontOrder] = []                       // groupes d'armées affectés à une ligne de front
+    var nextFrontID = 1
     var reports: [BattleReport] = []                    // rapports après bataille (les plus récents)
     var nextReportID = 1
 }
@@ -166,6 +168,7 @@ struct Simulation {
         state.day += 1
         dailyMilitary()
         dailyArmies()
+        if state.day % 2 == 0 { manageFronts() }
         dailyTraining()
         dailyConstruction()
         syncDepots()
