@@ -78,6 +78,7 @@ struct GameState: Codable {
     var nextPlanID = 1
     var fronts: [FrontOrder] = []                       // groupes d'armées affectés à une ligne de front
     var nextFrontID = 1
+    var summits: [String: Int] = [:]                    // dernier sommet entre deux pays (jour)
     var reports: [BattleReport] = []                    // rapports après bataille (les plus récents)
     var nextReportID = 1
 }

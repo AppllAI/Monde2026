@@ -72,7 +72,7 @@ enum PeaceTerms: String, Codable, CaseIterable {
 }
 
 enum ProposalKind: String, Codable, CaseIterable {
-    case alliance, nonAggression, tradePact, peace
+    case alliance, nonAggression, tradePact, peace, jointAttack
 
     var name: String {
         switch self {
@@ -80,6 +80,7 @@ enum ProposalKind: String, Codable, CaseIterable {
         case .nonAggression: return "Pacte de non-agression"
         case .tradePact: return "Accord commercial"
         case .peace: return "Traité de paix"
+        case .jointAttack: return "Attaque commune"
         }
     }
 
@@ -88,7 +89,7 @@ enum ProposalKind: String, Codable, CaseIterable {
         case .alliance: return .alliance
         case .nonAggression: return .nonAggression
         case .tradePact: return .tradePact
-        case .peace: return nil
+        case .peace, .jointAttack: return nil
         }
     }
 
@@ -98,7 +99,7 @@ enum ProposalKind: String, Codable, CaseIterable {
         case .alliance: return 25
         case .nonAggression: return 15
         case .tradePact: return 15
-        case .peace: return 0
+        case .peace, .jointAttack: return 0
         }
     }
 }
@@ -111,6 +112,8 @@ struct Proposal: Codable, Identifiable {
     let warID: Int?
     let terms: PeaceTerms?
     let day: Int
+    var target: CountryID? = nil      // attaque commune : le pays visé
+    var inDays: Int = 60
 }
 
 struct EvalReason: Identifiable {
@@ -562,6 +565,8 @@ extension Simulation {
         case .peace:
             guard let warID = warID, let terms = terms else { return Evaluation() }
             e = evaluatePeace(warID: warID, evaluator: to, terms: terms)
+        case .jointAttack:
+            e = Evaluation()
         }
         if from == state.playerID {
             e.add("Niveau de difficulté", state.difficulty.diplomacyBias)
@@ -863,6 +868,8 @@ extension Simulation {
         }
         if p.kind == .peace, let warID = p.warID, let terms = p.terms {
             applyPeace(warID: warID, terms: terms)
+        } else if p.kind == .jointAttack, let target = p.target {
+            acceptJointAttack(from: p.from, target: target, inDays: p.inDays)
         } else if let treaty = p.kind.treaty {
             addTreaty(treaty, p.from, p.to)
             changeRelation(p.from, p.to, by: 10)
@@ -899,6 +906,7 @@ extension Simulation {
         aiAgreements()
         aiFactions()
         aiProposalsToPlayer()
+        aiJointProposals()
         let today = state.day
         state.proposals.removeAll { today - $0.day > 60 }
         state.worldTension = (state.worldTension * 0.97 + Double(activeWarsList.count) * 0.8).clamped(0, 100)

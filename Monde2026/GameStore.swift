@@ -83,6 +83,7 @@ enum MapMode: String, CaseIterable, Identifiable {
     case military = "Puissance"
     case industry = "Industrie"
     case terrain = "Terrain"
+    case influence = "Influence"
 
     var id: String { rawValue }
 
@@ -98,6 +99,7 @@ enum MapMode: String, CaseIterable, Identifiable {
         case .conflicts: return "flame.fill"
         case .allies: return "person.2.fill"
         case .industry: return "building.2.fill"
+        case .influence: return "dot.radiowaves.left.and.right"
         }
     }
 }

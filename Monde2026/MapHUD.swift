@@ -154,7 +154,7 @@ struct MapLegend: View {
         case .military:
             item(Theme.coral, "En guerre")
             gradient([Theme.steel, Theme.amber], "Faible", "Puissante")
-        case .trade, .conflicts, .allies, .industry:
+        case .trade, .conflicts, .allies, .industry, .influence:
             EmptyView()
         case .terrain:
             ForEach(Terrain.allCases, id: \.self) { t in

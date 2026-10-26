@@ -693,6 +693,8 @@ struct LegendRow: View {
         case .military: return [(Theme.amber, "Puissante"), (Theme.steel, "Faible"), (Theme.coral, "En guerre")]
         case .industry: return [(Color(red: 0.42, green: 0.80, blue: 0.95), "Régions industrielles"), (Theme.steel.opacity(0.5), "Sans usines")]
         case .terrain: return Terrain.allCases.map { t in (Color(red: t.rgb.0, green: t.rgb.1, blue: t.rgb.2), t.name) }
+        case .influence: return ["USA", "CHN", "RUS", "FRA", "IND", "TUR"].map { (Color(uiColor: Theme.politicalColor($0)), Geo.flag($0)) }
+            + [(Color(uiColor: Theme.neutralLand), "Indépendant")]
         }
     }
 }

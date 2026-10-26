@@ -388,6 +388,10 @@ enum MapSnapshotBuilder {
             return UIColor(Theme.blend(Theme.steel, Theme.amber, min(1, sim.militaryPower(id) / 6000)))
         case .terrain, .industry:
             return Theme.politicalColor(id)
+        case .influence:
+            // Chaque pays prend la couleur de la grande puissance qui y pèse le plus.
+            guard let leader = sim.influenceLeader(of: id) else { return Theme.neutralLand }
+            return leader == id ? Theme.politicalColor(id).lighter(0.1) : Theme.politicalColor(leader).darker(0.18)
         case .trade:
             guard let p = player else { return Theme.neutralLand }
             if id == p { return UIColor(Theme.amber) }
