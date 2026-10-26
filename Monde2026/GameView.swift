@@ -334,6 +334,14 @@ struct NoticeStack: View {
                 .glass(16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            if let sim = store.sim, let p = store.playerID,
+               let pending = sim.state.pendingEvents.first(where: { $0.country == p }),
+               let def = sim.definition(for: pending), store.panel != .event(pending.id) {
+                DecisionNotice(title: def.title, icon: def.icon, bad: def.isBad, daysLeft: max(0, 30 - (sim.state.day - pending.day))) {
+                    store.open(.event(pending.id))
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
             if let id = store.reportNotice, let r = store.sim?.state.reports.first(where: { $0.id == id }) {
                 ReportNotice(report: r) {
                     store.reportNotice = nil
@@ -553,5 +561,34 @@ struct PerfBadge: View {
             .background(Color.black.opacity(0.6), in: Capsule())
             .onAppear { counter.start() }
             .onDisappear { counter.stop() }
+    }
+}
+
+/// Une décision attend (le temps continue) : un geste pour l'ouvrir.
+struct DecisionNotice: View {
+    let title: String
+    let icon: String
+    let bad: Bool
+    let daysLeft: Int
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(bad ? Theme.coral : Theme.amber)
+                    .frame(width: 34, height: 34)
+                    .background(Color.white.opacity(0.08), in: Circle())
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("À décider : " + title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper).lineLimit(1)
+                    Text("Sinon, le gouvernement tranche dans \(daysLeft) j").font(.system(size: 11)).foregroundStyle(Theme.steel)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.steel)
+            }
+            .padding(12)
+            .glass(16)
+        }
+        .buttonStyle(.plain)
     }
 }

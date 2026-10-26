@@ -38,10 +38,9 @@ enum Panel: Identifiable, Hashable {
 
     /// Panneau qui arrête le temps (une décision à prendre).
     var isModal: Bool {
-        switch self {
-        case .event, .endGame: return true
-        default: return false
-        }
+        // Seule la fin de partie arrête le temps : les décisions attendent sur une carte, le jeu continue.
+        if case .endGame = self { return true }
+        return false
     }
 
     /// Panneau qui laisse le temps s'écouler (on regarde la bataille se dérouler).
@@ -321,10 +320,8 @@ final class GameStore: ObservableObject {
         if let record = s.state.record, record.gameOver, !record.acknowledged {
             speed = 0
             panel = .endGame
-        } else if let event = s.state.pendingEvents.first(where: { $0.country == p }) {
-            speed = 0
-            panel = .event(event.id)
         }
+        _ = p
     }
 
     func acknowledgeEnd() {

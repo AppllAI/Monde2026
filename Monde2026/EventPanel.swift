@@ -40,7 +40,6 @@ struct EventPanel: View {
                     .buttonStyle(.plain)
                 }
             }
-            .interactiveDismissDisabled()
         } else {
             Text("Cet événement est terminé.").foregroundStyle(Theme.steel)
             QuietButton(title: "Fermer") { store.panel = nil }

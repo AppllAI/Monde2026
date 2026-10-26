@@ -40,6 +40,17 @@ extension Simulation {
     // MARK: Moteur des événements
 
     mutating func monthlyEvents() {
+        // Le temps ne s'arrête pas : une décision laissée en suspens 30 jours est prise par le gouvernement.
+        for pending in state.pendingEvents where state.day - pending.day >= 30 {
+            guard let def = definition(for: pending), let first = def.options.first else {
+                state.pendingEvents.removeAll { $0.id == pending.id }
+                continue
+            }
+            resolveEvent(pending.id, option: 0)
+            if pending.country == state.playerID {
+                addEvent("🏛️ Sans réponse de votre part, le gouvernement a tranché (\(def.title)) : \(first.label).", important: false)
+            }
+        }
         // Grands chocs mondiaux : touchent tout le monde.
         for def in EventCatalog.all where def.worldwide {
             guard state.day > 60, def.trigger(self, "").0 else { continue }
