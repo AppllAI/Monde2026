@@ -71,7 +71,7 @@ struct RootView: View {
                 }
                 if LaunchOptions.arguments.contains("-openreport") {
                     var tries = 0
-                    while (store.sim?.state.reports.isEmpty ?? false) && tries < 400 {
+                    while (store.sim?.state.reports.isEmpty ?? false) && tries < 200 {
                         store.step(days: 1)
                         tries += 1
                     }

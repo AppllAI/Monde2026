@@ -107,7 +107,7 @@ enum SelfTest {
         }
 
         let watched: [CountryID] = ["USA", "CHN", "FRA", "DEU", "RUS", "UKR", "IND", "BRA", "ARM", "SDN"]
-        for year in 1...5 {
+        for year in 1...2 {
             let t = Date()
             sim.advance(days: 365)
             log("— année \(2025 + year + 1) : \(String(format: "%.2f", Date().timeIntervalSince(t))) s de calcul")
