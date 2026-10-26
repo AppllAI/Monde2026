@@ -59,8 +59,24 @@ struct RootView: View {
                     let mine = sim.armies(of: id)
                     if let a = mine.first(where: { $0.engaged }) ?? mine.first { store.selectArmy(a.id) }
                 }
-                if LaunchOptions.arguments.contains("-openbattle"), let b = store.sim?.playerBattles().first {
-                    store.openBattle(b.province)
+                if LaunchOptions.arguments.contains("-openbattle") {
+                    // On avance jour après jour jusqu'à une bataille qui nous concerne.
+                    var tries = 0
+                    while (store.sim?.playerBattles().isEmpty ?? false) && tries < 200 {
+                        store.step(days: 1)
+                        tries += 1
+                    }
+                    store.panel = nil
+                    if let b = store.sim?.playerBattles().first { store.openBattle(b.province) }
+                }
+                if LaunchOptions.arguments.contains("-openreport") {
+                    var tries = 0
+                    while (store.sim?.state.reports.isEmpty ?? false) && tries < 400 {
+                        store.step(days: 1)
+                        tries += 1
+                    }
+                    store.panel = nil
+                    if let r = store.sim?.state.reports.last { store.panel = .report(r.id) }
                 }
                 if LaunchOptions.arguments.contains("-maptray") { store.mapTray = true }
                 switch LaunchOptions.value("-panel") {

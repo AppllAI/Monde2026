@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // =============================================================
 //  GameView.swift
@@ -9,6 +10,7 @@ import SwiftUI
 struct GameView: View {
     @ObservedObject var store: GameStore
     @AppStorage("tutorialSeen") private var tutorialSeen = false
+    @AppStorage("showPerf") private var showPerf = false
 
     @State private var wideLayout = true
 
@@ -18,12 +20,8 @@ struct GameView: View {
         GeometryReader { geo in
             let wide = geo.size.width > 700
             ZStack(alignment: .trailing) {
-                WorldMapView(snapshot: store.mapSnapshot, units: store.unitsSnapshot, unitAnimation: store.unitAnimation,
-                             satellite: store.satellite, focus: store.focus,
-                             onTap: { tap in store.handleTap(tap) },
-                             onDrop: { id, province, facing in store.dropArmy(id, at: province, facing: facing) })
-                .equatable()
-                .ignoresSafeArea()
+                MapHost(feed: store.feed, store: store, satellite: store.satellite, focus: store.focus)
+                    .ignoresSafeArea()
                 VStack(spacing: 10) {
                     TopBar(store: store, wide: wide)
                     HStack(alignment: .top, spacing: 10) {
@@ -78,6 +76,15 @@ struct GameView: View {
                         .transition(.move(edge: .trailing))
                         .id(GameSection.of(panel).map { "\($0)" } ?? panel.id)
                 }
+                if showPerf || LaunchOptions.arguments.contains("-perf") {
+                    VStack {
+                        HStack { PerfBadge(store: store); Spacer() }
+                        Spacer()
+                    }
+                    .padding(.top, 76)
+                    .padding(.leading, 16)
+                    .allowsHitTesting(false)
+                }
                 if !tutorialSeen {
                     TutorialOverlay { tutorialSeen = true }
                 }
@@ -111,6 +118,25 @@ struct GameView: View {
     }
 }
 
+/// La carte : elle observe seulement son flux (régions, unités), pas tout le magasin.
+/// Ainsi, chaque jour de jeu ne fait bouger que les pions, sans recalculer toute l'interface.
+struct MapHost: View {
+    @ObservedObject var feed: MapFeed
+    let store: GameStore
+    let satellite: Bool
+    let focus: MapFocus?
+
+    var body: some View {
+        WorldMapView(snapshot: feed.map, units: feed.units, unitAnimation: feed.animation,
+                     satellite: satellite, focus: focus,
+                     onTap: { tap in store.handleTap(tap) },
+                     onDrop: { id, province, facing in store.dropArmy(id, at: province, facing: facing) },
+                     onPreview: { id, province in store.previewOrder(id, to: province) },
+                     onStroke: { ids, path in store.handleStroke(enclosed: ids, path: path) })
+            .equatable()
+    }
+}
+
 /// Panneau latéral (iPad) : glisse depuis la droite, se ferme d'un geste vers la droite.
 struct PanelDrawer: View {
     @ObservedObject var store: GameStore
@@ -121,8 +147,8 @@ struct PanelDrawer: View {
         PanelHost(store: store, panel: panel)
             .frame(maxHeight: .infinity, alignment: .top)
             .background(Theme.ink.opacity(0.97))
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Theme.line))
+            .clipShape(HUDShape(cut: 16))
+            .overlay(HUDShape(cut: 16).strokeBorder(Theme.line))
             .overlay(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.25)).frame(width: 5, height: 46).padding(.leading, 6)
             }
@@ -211,7 +237,8 @@ struct SpeedControl: View {
             speedButton(3, icon: "forward.end.alt.fill", label: "Vitesse 3")
         }
         .padding(3)
-        .background(Color.white.opacity(0.07), in: Capsule())
+        .background(HUDShape(cut: 7, radius: 2).fill(Color.white.opacity(0.06)))
+        .overlay(HUDShape(cut: 7, radius: 2).strokeBorder(Color.white.opacity(0.12)))
     }
 
     private func speedButton(_ value: Int, icon: String, label: String) -> some View {
@@ -220,17 +247,19 @@ struct SpeedControl: View {
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .bold))
-                .frame(width: 32, height: 28)
+                .frame(width: 34, height: 30)
                 .foregroundStyle(store.speed == value ? Theme.ink : Theme.paper)
-                .background(store.speed == value ? Theme.amber : Color.clear, in: Capsule())
+                .background(HUDShape(cut: 5, radius: 1.5).fill(store.speed == value ? AnyShapeStyle(value == 0 ? Theme.coral : Theme.amber) : AnyShapeStyle(Color.clear)))
+                .shadow(color: store.speed == value ? Theme.amber.opacity(0.5) : .clear, radius: 5)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Pressable())
         .accessibilityLabel(label)
     }
 }
 
 struct GameMenu: View {
     @ObservedObject var store: GameStore
+    @AppStorage("showPerf") private var showPerf = false
 
     var body: some View {
         Menu {
@@ -238,6 +267,7 @@ struct GameMenu: View {
             Button { store.load() } label: { Label("Charger la sauvegarde", systemImage: "arrow.clockwise") }
             Toggle(isOn: $store.satellite) { Label("Vue satellite", systemImage: "globe") }
             Toggle(isOn: $store.autoPause) { Label("Pause sur les événements", systemImage: "bell") }
+            Toggle(isOn: $showPerf) { Label("Afficher la fluidité", systemImage: "speedometer") }
             Button { store.step(days: 30) } label: { Label("Avancer d'un mois", systemImage: "calendar") }
             Button { store.open(.endGame) } label: { Label("Score et objectifs", systemImage: "trophy") }
             Divider()
@@ -245,11 +275,12 @@ struct GameMenu: View {
                 Label("Quitter vers le menu", systemImage: "rectangle.portrait.and.arrow.right")
             }
         } label: {
-            Image(systemName: "ellipsis")
+            Image(systemName: "line.3.horizontal")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(Theme.paper)
-                .frame(width: 34, height: 34)
-                .background(Color.white.opacity(0.07), in: Circle())
+                .frame(width: 36, height: 36)
+                .background(HUDShape(cut: 7, radius: 2).fill(Color.white.opacity(0.07)))
+                .overlay(HUDShape(cut: 7, radius: 2).strokeBorder(Color.white.opacity(0.14)))
         }
         .accessibilityLabel("Menu")
     }
@@ -306,6 +337,21 @@ struct NoticeStack: View {
                 .glass(16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            if let sim = store.sim, let p = store.playerID,
+               let pending = sim.state.pendingEvents.first(where: { $0.country == p }),
+               let def = sim.definition(for: pending), store.panel != .event(pending.id) {
+                DecisionNotice(title: def.title, icon: def.icon, bad: def.isBad, daysLeft: max(0, 30 - (sim.state.day - pending.day))) {
+                    store.open(.event(pending.id))
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+            if let id = store.reportNotice, let r = store.sim?.state.reports.first(where: { $0.id == id }) {
+                ReportNotice(report: r) {
+                    store.reportNotice = nil
+                    store.open(.report(r.id))
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
             if let message = store.feedback {
                 Text(message).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink)
                     .padding(.horizontal, 14).padding(.vertical, 10)
@@ -317,6 +363,7 @@ struct NoticeStack: View {
         .sensoryFeedback(.warning, trigger: store.toasts.count)
         .animation(.snappy, value: store.toasts.map { $0.id })
         .animation(.snappy, value: store.feedback)
+        .animation(.snappy, value: store.reportNotice)
     }
 }
 
@@ -396,6 +443,8 @@ struct PanelHost: View {
                 case .battle(let province): BattlePanel(store: store, province: province)
                 case .army(let id): ArmyOrganizer(store: store, armyID: id)
                 case .diplo(let c, let a): DiploActionPanel(store: store, target: c, action: a)
+                case .report(let id): BattleReportPanel(store: store, reportID: id)
+                case .templates: TemplatesPanel(store: store)
                 }
                 }
                 .id(panel)
@@ -459,5 +508,91 @@ struct TutorialOverlay: View {
             .glass(24)
             .padding(24)
         }
+    }
+}
+
+// MARK: - Mesure de la fluidité
+
+/// Compte les images réellement affichées par seconde.
+final class FrameCounter: NSObject, ObservableObject {
+    @Published private(set) var fps = 0
+    private var link: CADisplayLink?
+    private var frames = 0
+    private var since = CACurrentMediaTime()
+
+    /// Intermédiaire faible : le lien d'affichage ne garde pas le compteur en vie.
+    private final class Proxy: NSObject {
+        weak var owner: FrameCounter?
+        @objc func tick() { owner?.tick() }
+    }
+
+    func start() {
+        guard link == nil else { return }
+        let proxy = Proxy()
+        proxy.owner = self
+        let l = CADisplayLink(target: proxy, selector: #selector(Proxy.tick))
+        l.add(to: .main, forMode: .common)
+        link = l
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+    }
+
+    fileprivate func tick() {
+        frames += 1
+        let now = CACurrentMediaTime()
+        if now - since >= 0.5 {
+            fps = Int((Double(frames) / (now - since)).rounded())
+            frames = 0
+            since = now
+        }
+    }
+}
+
+/// Petit compteur : images par seconde et temps de calcul d'un jour de jeu.
+struct PerfBadge: View {
+    let store: GameStore
+    @StateObject private var counter = FrameCounter()
+
+    var body: some View {
+        let ms = Int((store.dayCost * 1000).rounded())
+        Text("\(counter.fps) img/s · jour \(ms) ms")
+            .font(Theme.data(12, weight: .semibold))
+            .foregroundStyle(counter.fps >= 50 ? Theme.teal : (counter.fps >= 30 ? Theme.amber : Theme.coral))
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(Color.black.opacity(0.6), in: Capsule())
+            .onAppear { counter.start() }
+            .onDisappear { counter.stop() }
+    }
+}
+
+/// Une décision attend (le temps continue) : un geste pour l'ouvrir.
+struct DecisionNotice: View {
+    let title: String
+    let icon: String
+    let bad: Bool
+    let daysLeft: Int
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(bad ? Theme.coral : Theme.amber)
+                    .frame(width: 34, height: 34)
+                    .background(Color.white.opacity(0.08), in: Circle())
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("À décider : " + title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper).lineLimit(1)
+                    Text("Sinon, le gouvernement tranche dans \(daysLeft) j").font(.system(size: 11)).foregroundStyle(Theme.steel)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.steel)
+            }
+            .padding(12)
+            .glass(16)
+        }
+        .buttonStyle(.plain)
     }
 }

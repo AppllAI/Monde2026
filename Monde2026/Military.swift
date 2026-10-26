@@ -155,6 +155,10 @@ extension Simulation {
     // MARK: Relations de guerre
 
     func enemies(of id: CountryID) -> Set<CountryID> {
+        relCache.enemies(id, key: relationKey()) { computeEnemies(of: id) }
+    }
+
+    private func computeEnemies(of id: CountryID) -> Set<CountryID> {
         guard let me = state.countries[id], !me.capitulated else { return [] }
         var result = Set<CountryID>()
         for war in state.wars where war.isActive {
@@ -540,6 +544,7 @@ extension Simulation {
                 let army = Double(c.divisionCount) * c.divisionFill
                 if occupied >= 0.8 || (occupied >= 0.4 && army < 3) {
                     c.capitulated = true
+                    relCache.reset()
                     state.countries[id] = c
                     addEvent("🏳️ \(c.name) capitule.", important: true)
                 }

@@ -77,6 +77,10 @@ struct InboxCard: View {
                             if let terms = p.terms {
                                 Text(terms.name).font(Theme.small).foregroundStyle(Theme.steel)
                             }
+                            if let t = p.target {
+                                Text("Cible : \(Geo.flag(t)) \(sim.name(t)) · dans \(p.inDays) jours. Il faudra tenir parole.")
+                                    .font(Theme.small).foregroundStyle(Theme.amber)
+                            }
                         }
                     }
                     HStack(spacing: 8) {

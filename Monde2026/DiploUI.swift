@@ -9,7 +9,7 @@ import SwiftUI
 // =============================================================
 
 enum DiploAction: String, CaseIterable, Identifiable, Hashable {
-    case war, treaties, joint, arms, factories, expedition, betray, ultimatum, pressure
+    case war, treaties, aid, joint, arms, factories, expedition, betray, ultimatum, pressure
 
     var id: String { rawValue }
 
@@ -24,6 +24,7 @@ enum DiploAction: String, CaseIterable, Identifiable, Hashable {
         case .betray: return "Trahir"
         case .ultimatum: return "Ultimatum"
         case .pressure: return "Pression"
+        case .aid: return "Aide et paix"
         }
     }
 
@@ -38,6 +39,7 @@ enum DiploAction: String, CaseIterable, Identifiable, Hashable {
         case .betray: return "theatermask.and.paintbrush.fill"
         case .ultimatum: return "exclamationmark.bubble.fill"
         case .pressure: return "hand.raised.fill"
+        case .aid: return "heart.fill"
         }
     }
 
@@ -47,6 +49,7 @@ enum DiploAction: String, CaseIterable, Identifiable, Hashable {
         case .treaties, .joint: return Theme.teal
         case .arms, .factories, .expedition: return Theme.amber
         case .pressure: return Theme.sky
+        case .aid: return Theme.teal
         }
     }
 }
@@ -68,7 +71,7 @@ struct QuickDiplomacyBar: View {
                     }
                     .foregroundStyle(a.tint)
                     .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(a.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(a.tint.opacity(0.12), in: HUDShape(cut: 7))
                 }
                 .buttonStyle(Pressable())
             }
@@ -131,6 +134,50 @@ struct DiploActionPanel: View {
             case .pressure:
                 CovertOpsCard(store: store, sim: sim, player: p, target: target)
                 UNCard(store: store, sim: sim, player: p, target: target)
+            case .aid: aid(sim, p)
+            }
+        }
+    }
+
+    // MARK: Aide, sommet, médiation
+
+    @ViewBuilder
+    private func aid(_ sim: Simulation, _ p: CountryID) -> some View {
+        let wait = sim.summitCooldown(p, target)
+        Dossier(title: "Sommet", subtitle: "Une rencontre au plus haut niveau : rapproche vite (une fois par an, 15 d'influence).") {
+            ActionButton(title: wait > 0 ? "Prochain sommet dans \(wait) j" : "Organiser un sommet", icon: "person.2.fill",
+                         tint: Theme.teal, enabled: wait == 0) {
+                let t = target
+                store.perform { s, _ in s.summit(with: t) }
+            }
+        }
+        Dossier(title: "Aide humanitaire", subtitle: "Stabilise le pays et améliore les relations. Ses amis apprécient, ses ennemis non.") {
+            Picker("Montant", selection: $share) {
+                Text("1 Md$").tag(1.0)
+                Text("5 Md$").tag(5.0)
+                Text("20 Md$").tag(20.0)
+            }
+            .pickerStyle(.segmented)
+            ActionButton(title: "Envoyer l'aide", icon: "heart.fill", tint: Theme.teal) {
+                let t = target, amount = [1.0, 5.0, 20.0].contains(share) ? share : 1.0
+                store.perform { s, _ in s.humanitarianAid(to: t, amount: amount) }
+            }
+        }
+        let wars = sim.mediableWars(target)
+        Dossier(title: "Médiation de paix", subtitle: wars.isEmpty ? "\(sim.name(target)) n'est pas en guerre." :
+                    "Proposez-vous comme médiateur (25 d'influence). Plus ils sont las de la guerre, plus ils écoutent.") {
+            ForEach(wars) { w in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(w.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.paper)
+                        Text("Chances : \(Int(sim.mediationChance(w) * 100)) %").font(Theme.small).foregroundStyle(Theme.steel)
+                    }
+                    Spacer()
+                    QuietButton(title: "Proposer", icon: "hand.wave.fill", tint: Theme.teal) {
+                        let id = w.id
+                        store.perform { s, _ in s.mediate(id) }
+                    }
+                }
             }
         }
     }

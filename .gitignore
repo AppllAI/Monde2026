@@ -2,3 +2,5 @@ build/
 *.xcodeproj/
 DerivedData/
 .DS_Store
+livraison/
+livraison2/

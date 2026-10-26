@@ -72,7 +72,7 @@ enum PeaceTerms: String, Codable, CaseIterable {
 }
 
 enum ProposalKind: String, Codable, CaseIterable {
-    case alliance, nonAggression, tradePact, peace
+    case alliance, nonAggression, tradePact, peace, jointAttack
 
     var name: String {
         switch self {
@@ -80,6 +80,7 @@ enum ProposalKind: String, Codable, CaseIterable {
         case .nonAggression: return "Pacte de non-agression"
         case .tradePact: return "Accord commercial"
         case .peace: return "Traité de paix"
+        case .jointAttack: return "Attaque commune"
         }
     }
 
@@ -88,7 +89,7 @@ enum ProposalKind: String, Codable, CaseIterable {
         case .alliance: return .alliance
         case .nonAggression: return .nonAggression
         case .tradePact: return .tradePact
-        case .peace: return nil
+        case .peace, .jointAttack: return nil
         }
     }
 
@@ -98,7 +99,7 @@ enum ProposalKind: String, Codable, CaseIterable {
         case .alliance: return 25
         case .nonAggression: return 15
         case .tradePact: return 15
-        case .peace: return 0
+        case .peace, .jointAttack: return 0
         }
     }
 }
@@ -111,6 +112,8 @@ struct Proposal: Codable, Identifiable {
     let warID: Int?
     let terms: PeaceTerms?
     let day: Int
+    var target: CountryID? = nil      // attaque commune : le pays visé
+    var inDays: Int = 60
 }
 
 struct EvalReason: Identifiable {
@@ -200,6 +203,10 @@ extension Simulation {
 
     /// Alliés militaires : traités d'alliance + membres des mêmes blocs militaires.
     func allies(of id: CountryID) -> Set<CountryID> {
+        relCache.allies(id, key: relationKey()) { computeAllies(of: id) }
+    }
+
+    private func computeAllies(of id: CountryID) -> Set<CountryID> {
         var result = Set(partners(of: id, .alliance))
         for b in blocs(of: id) where b.isMilitary {
             result.formUnion(b.members)
@@ -293,7 +300,9 @@ extension Simulation {
 
     func relation(_ a: CountryID, _ b: CountryID) -> Double {
         if a == b { return 100 }
-        return state.relations[Simulation.pairKey(a, b)] ?? structuralRelation(a, b)
+        let key = Simulation.pairKey(a, b)
+        if let v = state.relations[key] { return v }
+        return relCache.structural(key, key: relationKey()) { structuralRelation(a, b) }
     }
 
     mutating func setRelation(_ a: CountryID, _ b: CountryID, _ value: Double) {
@@ -308,12 +317,62 @@ extension Simulation {
 
     /// Chaque mois, les relations tendent vers (structure + mémoire historique). La mémoire s'efface lentement.
     mutating func driftRelations() {
-        for key in Array(state.relations.keys) {
+        // Tout ce qui fait la relation « structurelle » est rangé une fois pour toutes (traités, blocs,
+        // revendications, guerres) : la mise à jour des ~14 000 paires de pays devient très rapide.
+        var treatyFlags: [String: (Double, Bool, Bool)] = [:]     // bonus, garantie, sanctions
+        for t in state.treaties {
+            let k = Simulation.pairKey(t.a, t.b)
+            var f = treatyFlags[k] ?? (0, false, false)
+            switch t.kind {
+            case .alliance: f.0 += 30
+            case .tradePact: f.0 += 10
+            case .nonAggression: f.0 += 5
+            case .guarantee: f.1 = true
+            case .sanctions: f.2 = true
+            }
+            treatyFlags[k] = f
+        }
+        var blocsOf: [CountryID: [Int]] = [:]
+        for (i, b) in state.blocs.enumerated() { for m in b.members { blocsOf[m, default: []].append(i) } }
+        let nato = Set(bloc("OTAN")?.members ?? []), csto = Set(bloc("OTSC")?.members ?? [])
+        var claimed = Set<String>()
+        for c in state.claims { claimed.insert(Simulation.pairKey(c.claimant, c.target)) }
+        var atWar = Set<String>()
+        for w in state.wars where w.isActive {
+            for x in w.attackers { for y in w.defenders { atWar.insert(Simulation.pairKey(x, y)) } }
+        }
+        var democratic: [CountryID: Bool] = [:]
+        for (id, c) in state.countries { democratic[id] = c.government.isDemocratic }
+        func structural(_ a: CountryID, _ b: CountryID, _ key: String) -> Double {
+            var r = 0.0
+            var military = false, economic = false, political = false
+            let ba = blocsOf[a] ?? [], bb = blocsOf[b] ?? []
+            for i in ba where bb.contains(i) {
+                let bloc = state.blocs[i]
+                if bloc.isMilitary { military = true } else if bloc.isEconomic { economic = true } else { political = true }
+            }
+            if military { r += 35 }
+            if economic { r += 20 }
+            if political { r += 10 }
+            if let f = treatyFlags[key] {
+                r += f.0
+                if f.1 { r += 20 }
+                if f.2 { r -= 35 }
+            }
+            if claimed.contains(key) { r -= 30 }
+            if (nato.contains(a) && csto.contains(b)) || (csto.contains(a) && nato.contains(b)) { r -= 25 }
+            if atWar.contains(key) { r -= 100 }
+            if let da = democratic[a], let db = democratic[b] {
+                r += da && db ? 10 : (da != db ? -5 : 5)
+            }
+            return r.clamped(-100, 100)
+        }
+        for (key, value) in state.relations {
             let parts = key.split(separator: "|")
-            guard parts.count == 2, let value = state.relations[key] else { continue }
+            guard parts.count == 2 else { continue }
             let a = String(parts[0]), b = String(parts[1])
             let memory = state.relationMemory[key] ?? 0
-            let target = (structuralRelation(a, b) + memory).clamped(-100, 100)
+            let target = (structural(a, b, key) + memory).clamped(-100, 100)
             state.relations[key] = value + (target - value) * 0.04
         }
         for key in Array(state.relationMemory.keys) {
@@ -530,6 +589,7 @@ extension Simulation {
         settleProvinces(between: war.attackers, and: war.defenders, keep: terms == .statusQuo)
         for id in war.attackers + war.defenders {
             state.countries[id]?.capitulated = false
+            relCache.reset()
         }
         if let a = war.attackers.first, let d = war.defenders.first {
             changeRelation(a, d, by: 25)
@@ -562,6 +622,8 @@ extension Simulation {
         case .peace:
             guard let warID = warID, let terms = terms else { return Evaluation() }
             e = evaluatePeace(warID: warID, evaluator: to, terms: terms)
+        case .jointAttack:
+            e = Evaluation()
         }
         if from == state.playerID {
             e.add("Niveau de difficulté", state.difficulty.diplomacyBias)
@@ -863,6 +925,8 @@ extension Simulation {
         }
         if p.kind == .peace, let warID = p.warID, let terms = p.terms {
             applyPeace(warID: warID, terms: terms)
+        } else if p.kind == .jointAttack, let target = p.target {
+            acceptJointAttack(from: p.from, target: target, inDays: p.inDays)
         } else if let treaty = p.kind.treaty {
             addTreaty(treaty, p.from, p.to)
             changeRelation(p.from, p.to, by: 10)
@@ -886,19 +950,22 @@ extension Simulation {
     // MARK: - IA diplomatique (chaque mois)
 
     mutating func monthlyDiplomacy() {
-        driftRelations()
+        timed("d.relations") { $0.driftRelations() }
         for id in countryIDs {
             guard let c = state.countries[id] else { continue }
             let gain = 1 + log10(max(c.gdp, 1)) / 2
             state.countries[id]?.influence = min(100, c.influence + gain)
         }
         updateWarMomentum()
-        aiPeace()
-        aiMilitaryAid()
-        aiWarPlans()
-        aiAgreements()
-        aiFactions()
-        aiProposalsToPlayer()
+        timed("d.paix") { $0.aiPeace() }
+        timed("d.aide") { $0.aiMilitaryAid() }
+        timed("d.plans") { $0.aiWarPlans() }
+        timed("d.accords") { $0.aiAgreements() }
+        timed("d.factions") { $0.aiFactions() }
+        timed("d.joueur") { sim in
+            sim.aiProposalsToPlayer()
+            sim.aiJointProposals()
+        }
         let today = state.day
         state.proposals.removeAll { today - $0.day > 60 }
         state.worldTension = (state.worldTension * 0.97 + Double(activeWarsList.count) * 0.8).clamped(0, 100)

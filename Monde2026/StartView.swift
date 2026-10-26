@@ -65,16 +65,38 @@ struct StartView: View {
     private var background: some View {
         ZStack {
             Theme.ink.ignoresSafeArea()
-            RadialGradient(colors: [Theme.sky.opacity(0.18), .clear], center: .topTrailing, startRadius: 20, endRadius: 520)
+            // Grille tactique et lueurs : l'ambiance d'une salle de commandement.
+            Canvas { ctx, size in
+                let step: CGFloat = 36
+                var grid = Path()
+                var x: CGFloat = 0
+                while x < size.width { grid.move(to: CGPoint(x: x, y: 0)); grid.addLine(to: CGPoint(x: x, y: size.height)); x += step }
+                var y: CGFloat = 0
+                while y < size.height { grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: size.width, y: y)); y += step }
+                ctx.stroke(grid, with: .color(Theme.sky.opacity(0.06)), lineWidth: 1)
+                // Cercles de radar
+                let c = CGPoint(x: size.width * 0.82, y: size.height * 0.18)
+                for r in stride(from: 80.0, through: 520.0, by: 110.0) {
+                    ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
+                               with: .color(Theme.sky.opacity(0.07)), lineWidth: 1)
+                }
+            }
+            .ignoresSafeArea()
+            RadialGradient(colors: [Theme.sky.opacity(0.22), .clear], center: .topTrailing, startRadius: 20, endRadius: 560)
                 .ignoresSafeArea()
-            RadialGradient(colors: [Theme.amber.opacity(0.10), .clear], center: .bottomLeading, startRadius: 10, endRadius: 420)
+            RadialGradient(colors: [Theme.amber.opacity(0.14), .clear], center: .bottomLeading, startRadius: 10, endRadius: 460)
                 .ignoresSafeArea()
         }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Monde 2026").font(Theme.title(44)).foregroundStyle(Theme.paper)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("GRANDE STRATÉGIE · LE MONDE D'AUJOURD'HUI").font(Theme.label(12)).tracking(2.4).foregroundStyle(Theme.amber)
+            Text("MONDE 2026")
+                .font(.system(size: 64, weight: .black).width(.condensed))
+                .tracking(2)
+                .foregroundStyle(LinearGradient(colors: [Theme.paper, Theme.amber], startPoint: .top, endPoint: .bottom))
+                .shadow(color: Theme.amber.opacity(0.35), radius: 16)
             Text("Prenez la tête d'un pays au 1er janvier 2026. Économie, armées, alliances et rivalités sont celles d'aujourd'hui.")
                 .font(.system(size: 15)).foregroundStyle(Theme.steel)
                 .fixedSize(horizontal: false, vertical: true)
@@ -91,17 +113,18 @@ struct StartView: View {
                     .foregroundStyle(Theme.paper)
             }
             .padding(12)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            .background(HUDShape(cut: 8).fill(Color.white.opacity(0.06)))
+            .overlay(HUDShape(cut: 8).strokeBorder(Theme.edge))
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(CountryFilter.allCases) { f in
                         Button {
                             filter = f
                         } label: {
-                            Text(f.rawValue).font(.system(size: 13, weight: .medium))
-                                .padding(.horizontal, 12).padding(.vertical, 7)
+                            Text(f.rawValue.uppercased()).font(Theme.label(12.5)).tracking(0.8)
+                                .padding(.horizontal, 12).padding(.vertical, 8)
                                 .foregroundStyle(filter == f ? Theme.ink : Theme.paper)
-                                .background(filter == f ? Theme.paper : Color.white.opacity(0.06), in: Capsule())
+                                .background(HUDShape(cut: 6, radius: 2).fill(filter == f ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Color.white.opacity(0.06))))
                         }
                         .buttonStyle(.plain)
                     }
@@ -175,24 +198,41 @@ struct CountryCard: View {
     let atWar: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            FlagBadge(id: country.id, size: 34)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(country.name).font(Theme.title(17)).foregroundStyle(Theme.paper).lineLimit(1)
-                Text("\(Fmt.money(country.gdp)), \(Fmt.troops(country.activePersonnel)) soldats")
-                    .font(Theme.data(12)).foregroundStyle(Theme.steel)
-                if atWar {
-                    Text("En guerre").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.coral)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                FlagBadge(id: country.id, size: 28)
+                    .frame(width: 44, height: 44)
+                    .background(HUDShape(cut: 8).fill(Theme.raised))
+                    .overlay(HUDShape(cut: 8).strokeBorder(selected ? Theme.amber : Theme.edge, lineWidth: 1))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(country.name.uppercased()).font(Theme.title(17)).tracking(0.5).foregroundStyle(Theme.paper).lineLimit(1)
+                    if atWar {
+                        Label("EN GUERRE", systemImage: "flame.fill").font(Theme.label(10)).foregroundStyle(Theme.coral)
+                    } else {
+                        Text(country.government.name.uppercased()).font(Theme.label(10)).tracking(0.6).foregroundStyle(Theme.steel)
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            HStack(spacing: 10) {
+                stat("banknote.fill", Fmt.money(country.gdp), Theme.amber)
+                stat("shield.lefthalf.filled", "\(country.divisionCount) div.", Theme.sky)
+                stat("person.3.fill", Fmt.troops(country.activePersonnel), Theme.teal)
+            }
         }
         .padding(12)
-        .background(selected ? Theme.amber.opacity(0.16) : Color.white.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .strokeBorder(selected ? Theme.amber : Theme.line, lineWidth: selected ? 2 : 1))
+        .background(HUDShape(cut: 10).fill(selected ? AnyShapeStyle(LinearGradient(colors: [Theme.amber.opacity(0.22), Theme.amber.opacity(0.06)], startPoint: .top, endPoint: .bottom))
+                                                    : AnyShapeStyle(LinearGradient(colors: [Theme.raised.opacity(0.7), Theme.deep.opacity(0.6)], startPoint: .top, endPoint: .bottom))))
+        .overlay(HUDShape(cut: 10).strokeBorder(selected ? Theme.amber : Theme.line, lineWidth: selected ? 2 : 1))
+        .shadow(color: selected ? Theme.amber.opacity(0.3) : .clear, radius: 10)
         .contentShape(Rectangle())
         .accessibilityAddTraits(.isButton)
+    }
+
+    private func stat(_ icon: String, _ value: String, _ tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 10, weight: .bold)).foregroundStyle(tint)
+            Text(value).font(Theme.data(11.5, weight: .semibold)).foregroundStyle(Theme.paper.opacity(0.9)).lineLimit(1)
+        }
     }
 }

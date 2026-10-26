@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -109,14 +109,19 @@ jobs:
           xcrun simctl io "$UDID" screenshot /tmp/out/6-armee.png
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
-          xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 45 -openbattle
-          sleep 25
+          xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 20 -openbattle
+          sleep 40
           xcrun simctl io "$UDID" screenshot /tmp/out/7-bataille.png
+          xcrun simctl terminate "$UDID" $BUNDLE || true
+          sleep 2
+          xcrun simctl launch "$UDID" $BUNDLE -autostart UKR -speed 0 -advance 30 -openreport
+          sleep 50
+          xcrun simctl io "$UDID" screenshot /tmp/out/12-rapport.png
           xcrun simctl terminate "$UDID" $BUNDLE || true
           sleep 2
 
           # 4. Une partie en accéléré
-          (xcrun simctl launch --console-pty "$UDID" $BUNDLE -autostart FRA -speed 3 > game.log 2>&1 &)
+          (xcrun simctl launch --console-pty "$UDID" $BUNDLE -autostart FRA -speed 3 -perf > game.log 2>&1 &)
           sleep 20
           xcrun simctl io "$UDID" screenshot /tmp/out/3-partie.png
           sleep 40

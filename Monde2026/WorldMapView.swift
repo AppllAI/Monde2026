@@ -46,7 +46,7 @@ struct ProvinceFill: Equatable {
 }
 
 enum BorderKind: UInt8 {
-    case hidden, region, country, player, selected, front
+    case hidden, region, country, player, selected, front, hot   // hot : front où l'on se bat
 }
 
 struct MapLabel: Equatable, Identifiable {
@@ -57,6 +57,9 @@ struct MapLabel: Equatable, Identifiable {
     let size: Double           // taille de police en points MapKit
     let isCountry: Bool
     let highlighted: Bool
+    var angle: Double = 0      // orientation (radians) : le nom suit l'allongement du pays
+    var span: Double = 0       // longueur sur laquelle s'étale le nom (points MapKit)
+    var bend: Double = 0       // courbure (fraction de la longueur)
 }
 
 struct PlanLine: Equatable, Identifiable {
@@ -179,9 +182,10 @@ enum MapSnapshotBuilder {
                 let holder = info.owner ?? p.country
                 fills.append(ProvinceFill(color: RGBA(color(holder)), stripes: RGBA(allyBlue, alpha: 0.95)))
             case .occupied:
+                // Territoire occupé : la couleur de l'occupant, plus claire, rayée de celle du pays d'origine.
                 let holder = info.owner ?? p.country
-                fills.append(ProvinceFill(color: RGBA(color(holder)),
-                                          stripes: RGBA(color(p.country), alpha: 0.85)))
+                fills.append(ProvinceFill(color: RGBA(color(holder).lighter(0.18)),
+                                          stripes: RGBA(color(p.country), alpha: 0.6)))
             case .core where mode == .terrain, .annexed where mode == .terrain:
                 let t = TerrainMap.terrain(p.id).rgb
                 fills.append(ProvinceFill(color: RGBA(UIColor(red: t.0, green: t.1, blue: t.2, alpha: 1)), stripes: nil))
@@ -217,7 +221,9 @@ enum MapSnapshotBuilder {
                 continue
             }
             if let a = oa, let b = ob, enemies(a).contains(b) {
-                borders.append(.front)
+                // Front actif (bataille d'un côté ou de l'autre) : ligne plus épaisse et plus vive.
+                let hot = sim.state.battles[border.a] != nil || sim.state.battles[border.b] != nil
+                borders.append(hot ? .hot : .front)
             } else if oa == nil || ob == nil {
                 borders.append(.front)        // front contre les rebelles
             } else if let s = selected, oa == s || ob == s {
@@ -284,9 +290,36 @@ enum MapSnapshotBuilder {
             let side = bestArea.squareRoot()
             let byArea = side * 0.20
             let byWidth = side * 1.5 / (0.62 * Double(max(4, name.count)))
-            let size = min(byArea, byWidth) * pointsPerKm
+            var size = min(byArea, byWidth) * pointsPerKm
+            // Allongement du territoire (analyse des axes principaux) : le nom suit le pays, légèrement courbé.
+            var sxx = 0.0, syy = 0.0, sxy = 0.0
+            for id in best {
+                let p = provinces[id].labelPoint, w = provinces[id].weight
+                let b = provinces[id].bounds
+                sxx += w * ((p.x - x) * (p.x - x) + b.size.width * b.size.width / 12)
+                syy += w * ((p.y - y) * (p.y - y) + b.size.height * b.size.height / 12)
+                sxy += w * (p.x - x) * (p.y - y)
+            }
+            sxx /= bestArea; syy /= bestArea; sxy /= bestArea
+            var angle = 0.5 * atan2(2 * sxy, sxx - syy)
+            let tr = sxx + syy, det = sxx * syy - sxy * sxy
+            let gap = max(0, tr * tr / 4 - det).squareRoot()
+            let major = (tr / 2 + gap).squareRoot(), minor = max(1, (tr / 2 - gap)).squareRoot()
+            var span = 0.0
+            if major / minor > 1.25 && best.count > 1 {
+                // On garde un sens de lecture confortable.
+                angle = max(-0.6, min(0.6, angle))
+                span = major * 3.0
+                let n = Double(max(3, name.count))
+                // Taille pour que le nom, espacé, couvre environ les trois quarts de la longueur.
+                let fit = span * 0.78 / (0.62 * n + 0.3 * (n - 1))
+                size = max(size, min(fit, minor * 1.2, size * 1.5))
+            } else {
+                angle = 0
+            }
             labels.append(MapLabel(id: "c-" + owner, text: name, x: x, y: y, size: size, isCountry: true,
-                                   highlighted: owner == player || owner == selected))
+                                   highlighted: owner == player || owner == selected,
+                                   angle: angle, span: span, bend: span > 0 ? 0.035 : 0))
         }
         // Noms des régions (visibles seulement de près)
         for p in provinces where p.weight > 2000 {
@@ -355,6 +388,10 @@ enum MapSnapshotBuilder {
             return UIColor(Theme.blend(Theme.steel, Theme.amber, min(1, sim.militaryPower(id) / 6000)))
         case .terrain, .industry:
             return Theme.politicalColor(id)
+        case .influence:
+            // Chaque pays prend la couleur de la grande puissance qui y pèse le plus.
+            guard let leader = sim.influenceLeader(of: id) else { return Theme.neutralLand }
+            return leader == id ? Theme.politicalColor(id).lighter(0.1) : Theme.politicalColor(leader).darker(0.18)
         case .trade:
             guard let p = player else { return Theme.neutralLand }
             if id == p { return UIColor(Theme.amber) }
@@ -417,6 +454,8 @@ struct WorldMapView: UIViewRepresentable, Equatable {
     let focus: MapFocus?
     let onTap: (MapTap) -> Void
     var onDrop: (Int, Int, Int?) -> Void = { _, _, _ in }
+    var onPreview: (Int, Int) -> (path: [Int], days: Int, attack: Bool)? = { _, _ in nil }
+    var onStroke: ([Int], [GeoPoint]) -> Void = { _, _ in }
 
     static func == (lhs: WorldMapView, rhs: WorldMapView) -> Bool {
         lhs.snapshot == rhs.snapshot && lhs.units == rhs.units && lhs.satellite == rhs.satellite && lhs.focus == rhs.focus
@@ -440,7 +479,6 @@ struct WorldMapView: UIViewRepresentable, Equatable {
         map.setRegion(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 42, longitude: 20),
                                          span: MKCoordinateSpan(latitudeDelta: 100, longitudeDelta: 150)),
                       animated: false)
-        map.addOverlay(context.coordinator.overlay, level: .aboveLabels)
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(MapCoordinator.handleTap(_:)))
         map.addGestureRecognizer(tap)
         context.coordinator.mapView = map
@@ -462,9 +500,10 @@ struct WorldMapView: UIViewRepresentable, Equatable {
             // Fond satellite sans aucun nom : en mode normal, la carte du jeu le recouvre entièrement
             // (océans compris), comme dans un jeu de grande stratégie.
             map.preferredConfiguration = MKImageryMapConfiguration(elevationStyle: .flat)
-            coordinator.renderer?.fillAlpha = satellite ? 0.55 : 1.0
-            coordinator.renderer?.drawsOcean = !satellite
-            coordinator.renderer?.setNeedsDisplay()
+            // On remplace la couche des régions (le remplacement du fond se décide à sa création).
+            map.removeOverlay(coordinator.overlay)
+            coordinator.overlay = ProvinceOverlay(replaces: !satellite)
+            map.addOverlay(coordinator.overlay, level: .aboveLabels)
         }
         if let focus = focus, focus.id != coordinator.lastFocusID {
             coordinator.lastFocusID = focus.id
@@ -473,6 +512,8 @@ struct WorldMapView: UIViewRepresentable, Equatable {
         }
         coordinator.apply(snapshot)
         coordinator.unitLayer?.onDrop = onDrop
+        coordinator.unitLayer?.onPreview = onPreview
+        coordinator.unitLayer?.onStroke = onStroke
         coordinator.unitLayer?.apply(units, animated: unitAnimation)
     }
 }
@@ -480,6 +521,11 @@ struct WorldMapView: UIViewRepresentable, Equatable {
 // MARK: - Couche unique de toutes les régions
 
 final class ProvinceOverlay: NSObject, MKOverlay {
+    /// Sans fond satellite, la carte du jeu remplace entièrement celle d'Apple : MapKit ne télécharge
+    /// ni ne dessine plus rien dessous (gros gain de fluidité).
+    let replaces: Bool
+    init(replaces: Bool = true) { self.replaces = replaces }
+    var canReplaceMapContent: Bool { replaces }
     var coordinate: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: 0, longitude: 0) }
     var boundingMapRect: MKMapRect { .world }
 }
@@ -489,7 +535,6 @@ final class ProvinceRenderer: MKOverlayRenderer {
     private var snapshot = MapSnapshot.empty
     var fillAlpha: CGFloat = 1.0
     var drawsOcean = true
-    private static let ocean = UIColor(red: 0.07, green: 0.13, blue: 0.21, alpha: 1)
     private static let coast = UIColor(red: 0.03, green: 0.05, blue: 0.08, alpha: 0.9)
 
     func update(_ newSnapshot: MapSnapshot) {
@@ -509,44 +554,68 @@ final class ProvinceRenderer: MKOverlayRenderer {
         let margin = mapRect.size.width * 0.05
         let area = mapRect.insetBy(dx: -margin, dy: -margin)
         let detailed = zoomScale > 1.0 / 4096        // zoom suffisant pour les détails
+        let level = MapDetail.level(forPixel: Double(px))
+        func shape(_ i: Int) -> CGPath { MapDetail.provincePath(i, level: level) }
+        let visible = provinces.indices.filter { provinces[$0].bounds.intersects(area) }
 
         if drawsOcean {
-            context.setFillColor(ProvinceRenderer.ocean.cgColor)
-            context.fill(rect(for: mapRect))
-        }
-        // Eaux peu profondes : un halo clair le long des côtes.
-        if drawsOcean {
+            // Mer : dégradé selon la latitude (plus sombre vers les pôles), continu d'une tuile à l'autre.
+            context.saveGState()
+            context.clip(to: rect(for: mapRect))
+            let world = MKMapSize.world.height
+            context.drawLinearGradient(MapArt.oceanGradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: world), options: [])
+            context.restoreGState()
+            // Eaux peu profondes : un halo clair le long des côtes.
             context.setLineJoin(.round)
-            for (width, alpha) in [(14.0, 0.10), (7.0, 0.16)] as [(CGFloat, CGFloat)] {
-                context.setStrokeColor(UIColor(red: 0.35, green: 0.62, blue: 0.80, alpha: alpha).cgColor)
+            for (width, alpha) in [(22.0, 0.06), (12.0, 0.09), (5.0, 0.14)] as [(CGFloat, CGFloat)] {
+                context.setStrokeColor(UIColor(red: 0.40, green: 0.68, blue: 0.84, alpha: alpha).cgColor)
                 context.setLineWidth(width * px)
-                for p in provinces where p.coastal && p.bounds.intersects(area) { context.addPath(p.path) }
+                for i in visible where provinces[i].coastal { context.addPath(shape(i)) }
                 context.strokePath()
             }
         }
+        // Côtes : un trait sombre tracé AVANT le remplissage ; les régions recouvrent la moitié intérieure,
+        // il ne reste qu'un liseré net le long de la mer (et rien entre deux régions voisines).
+        context.setStrokeColor(ProvinceRenderer.coast.cgColor)
+        context.setLineWidth(1.8 * px)
+        context.setLineJoin(.round)
+        for i in visible where provinces[i].coastal { context.addPath(shape(i)) }
+        context.strokePath()
         context.setAlpha(fillAlpha)
         context.beginTransparencyLayer(auxiliaryInfo: nil)
         // 1. Remplissage des régions
-        for (i, p) in provinces.enumerated() where p.bounds.intersects(area) {
+        for i in visible {
             let fill = snap.fills[i]
-            context.addPath(p.path)
+            context.addPath(shape(i))
             context.setFillColor(fill.color.cgColor)
             context.fillPath()
-            if let stripes = fill.stripes {
-                drawStripes(in: p, color: stripes, spacing: 7 * px, width: 2.2 * px, rect: area, context: context)
+        }
+        // 1b. Relief : motifs discrets selon le terrain (montagnes, collines, forêts, déserts…), de près.
+        if zoomScale > 1.0 / 20_000 && drawsOcean {
+            let tile = MapArt.patternSize * px
+            for i in visible {
+                guard let image = MapArt.pattern(TerrainMap.terrain(i)) else { continue }
+                let b = provinces[i].bounds.intersection(area)
+                guard !b.isNull, b.size.width > 0 else { continue }
+                context.saveGState()
+                context.addPath(shape(i))
+                context.clip()
+                context.setAlpha(0.55)
+                // Motif calé sur une grille fixe : il se raccorde parfaitement d'une tuile à l'autre.
+                let x0 = floor(b.minX / Double(tile)) * Double(tile), y0 = floor(b.minY / Double(tile)) * Double(tile)
+                context.draw(image, in: CGRect(x: x0, y: y0, width: Double(tile), height: Double(tile)), byTiling: true)
+                context.restoreGState()
+            }
+        }
+        // 1c. Hachures des territoires occupés
+        for i in visible {
+            if let stripes = snap.fills[i].stripes {
+                drawStripes(in: i, path: shape(i), color: stripes, spacing: 7 * px, width: 2.2 * px, rect: area, context: context)
             }
         }
         context.endTransparencyLayer()
         context.setAlpha(1)
 
-        // Côtes : un trait sombre autour de chaque région (les frontières sont redessinées par-dessus).
-        context.setStrokeColor(ProvinceRenderer.coast.cgColor)
-        context.setLineWidth(0.9 * px)
-        context.setLineJoin(.round)
-        for p in provinces where p.bounds.intersects(area) {
-            context.addPath(p.path)
-        }
-        context.strokePath()
 
         // 2. Frontières
         context.setLineJoin(.round)
@@ -554,76 +623,74 @@ final class ProvinceRenderer: MKOverlayRenderer {
         let borders = ProvinceMap.borders
         let kinds = snap.borders
         guard kinds.count == borders.count else { return }
+        let visibleBorders = borders.indices.filter { borders[$0].bounds.intersects(area) }
+        func line(_ i: Int) -> CGPath { MapDetail.borderPath(i, level: level) }
         // Passe 1 : frontières de régions (fines), seulement de près.
         if detailed {
-            context.setStrokeColor(UIColor.black.withAlphaComponent(0.22).cgColor)
+            context.setStrokeColor(UIColor.black.withAlphaComponent(0.20).cgColor)
             context.setLineWidth(0.6 * px)
-            for (i, b) in borders.enumerated() where kinds[i] == .region && b.bounds.intersects(area) {
-                context.addPath(b.path)
-            }
+            for i in visibleBorders where kinds[i] == .region { context.addPath(line(i)) }
             context.strokePath()
         }
-        // Passe 2 : frontières de pays (une ombre douce, puis un trait net).
-        context.setStrokeColor(UIColor.black.withAlphaComponent(0.28).cgColor)
-        context.setLineWidth(4.5 * px)
-        for (i, b) in borders.enumerated() where (kinds[i] == .country || kinds[i] == .player || kinds[i] == .selected)
-            && b.bounds.intersects(area) {
-            context.addPath(b.path)
+        // Grands fleuves : un filet bleu le long des frontières qu'ils dessinent.
+        if zoomScale > 1.0 / 12_000 {
+            context.setStrokeColor(UIColor(red: 0.45, green: 0.72, blue: 0.92, alpha: 0.85).cgColor)
+            context.setLineWidth(1.6 * px)
+            var any = false
+            for i in visibleBorders where TerrainMap.river(borders[i].a, borders[i].b) {
+                context.addPath(line(i))
+                any = true
+            }
+            if any { context.strokePath() }
         }
+        // Passe 2 : frontières de pays : une bande sombre large et douce, puis un trait net et clair.
+        let countryKinds: Set<BorderKind> = [.country, .player, .selected]
+        context.setStrokeColor(UIColor.black.withAlphaComponent(0.22).cgColor)
+        context.setLineWidth(6 * px)
+        for i in visibleBorders where countryKinds.contains(kinds[i]) { context.addPath(line(i)) }
         context.strokePath()
-        context.setStrokeColor(UIColor(red: 0.05, green: 0.07, blue: 0.1, alpha: 0.85).cgColor)
-        context.setLineWidth(1.4 * px)
-        for (i, b) in borders.enumerated() where (kinds[i] == .country || kinds[i] == .player || kinds[i] == .selected)
-            && b.bounds.intersects(area) {
-            context.addPath(b.path)
-        }
+        context.setStrokeColor(UIColor(red: 0.04, green: 0.06, blue: 0.09, alpha: 0.9).cgColor)
+        context.setLineWidth(1.8 * px)
+        for i in visibleBorders where countryKinds.contains(kinds[i]) { context.addPath(line(i)) }
+        context.strokePath()
+        context.setStrokeColor(UIColor.white.withAlphaComponent(0.16).cgColor)
+        context.setLineWidth(0.6 * px)
+        for i in visibleBorders where countryKinds.contains(kinds[i]) { context.addPath(line(i)) }
         context.strokePath()
         // Passe 3 : frontières du joueur et du pays sélectionné.
-        stroke(kinds, .player, color: UIColor(Theme.amber).withAlphaComponent(0.9), width: 2 * px, area: area, context: context)
-        stroke(kinds, .selected, color: UIColor.white.withAlphaComponent(0.95), width: 2.2 * px, area: area, context: context)
+        stroke(kinds, .player, among: visibleBorders, level: level, color: UIColor(Theme.amber).withAlphaComponent(0.9), width: 2 * px, context: context)
+        stroke(kinds, .selected, among: visibleBorders, level: level, color: UIColor.white.withAlphaComponent(0.95), width: 2.2 * px, context: context)
         // Passe 4 : lignes de front (halo + trait).
-        stroke(kinds, .front, color: UIColor(Theme.coral).withAlphaComponent(0.35), width: 7 * px, area: area, context: context)
-        stroke(kinds, .front, color: UIColor(Theme.coral), width: 2.6 * px, area: area, context: context)
-
-        // 2b. Régions où l'on peut construire (mode placement)
-        if !snap.highlight.isEmpty {
-            for id in snap.highlight where id < provinces.count && provinces[id].bounds.intersects(area) {
-                context.addPath(provinces[id].path)
-            }
-            context.setFillColor(UIColor(Theme.amber).withAlphaComponent(0.22).cgColor)
-            context.fillPath()
-            for id in snap.highlight where id < provinces.count && provinces[id].bounds.intersects(area) {
-                context.addPath(provinces[id].path)
-            }
-            context.setStrokeColor(UIColor(Theme.amber).cgColor)
-            context.setLineWidth(1.8 * px)
-            context.strokePath()
-        }
-
-        // 3. Région sélectionnée
-        if let sel = snap.selectedProvince, sel < provinces.count, provinces[sel].bounds.intersects(area) {
-            context.addPath(provinces[sel].path)
-            context.setFillColor(UIColor.white.withAlphaComponent(0.18).cgColor)
-            context.fillPath()
-            context.addPath(provinces[sel].path)
-            context.setStrokeColor(UIColor(Theme.amber).cgColor)
-            context.setLineWidth(2.5 * px)
-            context.strokePath()
-        }
+        stroke(kinds, .front, among: visibleBorders, level: level, color: UIColor(Theme.coral).withAlphaComponent(0.30), width: 9 * px, context: context)
+        stroke(kinds, .front, among: visibleBorders, level: level, color: UIColor(Theme.coral), width: 2.6 * px, context: context)
+        // Fronts où l'on se bat : halo large, trait épais, cœur clair.
+        stroke(kinds, .hot, among: visibleBorders, level: level, color: UIColor(red: 1, green: 0.35, blue: 0.2, alpha: 0.28), width: 18 * px, context: context)
+        stroke(kinds, .hot, among: visibleBorders, level: level, color: UIColor(Theme.coral), width: 4.5 * px, context: context)
+        stroke(kinds, .hot, among: visibleBorders, level: level, color: UIColor(red: 1, green: 0.85, blue: 0.6, alpha: 0.9), width: 1.2 * px, context: context)
 
         // 4. Troupes massées : flèches pointillées
         if !snap.plans.isEmpty {
             context.setStrokeColor(UIColor(Theme.amber).cgColor)
             context.setLineWidth(2.5 * px)
             context.setLineDash(phase: 0, lengths: [7 * px, 6 * px])
-            for line in snap.plans {
-                let a = MKMapPoint(CLLocationCoordinate2D(latitude: line.from.lat, longitude: line.from.lon))
-                let b = MKMapPoint(CLLocationCoordinate2D(latitude: line.to.lat, longitude: line.to.lon))
+            for plan in snap.plans {
+                let a = MKMapPoint(CLLocationCoordinate2D(latitude: plan.from.lat, longitude: plan.from.lon))
+                let b = MKMapPoint(CLLocationCoordinate2D(latitude: plan.to.lat, longitude: plan.to.lon))
                 context.move(to: CGPoint(x: a.x, y: a.y))
                 context.addLine(to: CGPoint(x: b.x, y: b.y))
             }
             context.strokePath()
             context.setLineDash(phase: 0, lengths: [])
+        }
+
+        // 5. Grain discret sur toute la carte (aspect « carte imprimée »).
+        if drawsOcean {
+            let tile = MapArt.grainSize * px
+            let x0 = floor(mapRect.minX / Double(tile)) * Double(tile), y0 = floor(mapRect.minY / Double(tile)) * Double(tile)
+            context.saveGState()
+            context.clip(to: rect(for: mapRect))
+            context.draw(MapArt.grain, in: CGRect(x: x0, y: y0, width: Double(tile), height: Double(tile)), byTiling: true)
+            context.restoreGState()
         }
 
         // 6. Noms
@@ -635,18 +702,15 @@ final class ProvinceRenderer: MKOverlayRenderer {
             } else {
                 guard screen >= 8.5, screen <= 34 else { continue }
             }
-            let halfWidth = label.size * 0.35 * Double(label.text.count) + label.size
-            let rect = MKMapRect(x: label.x - halfWidth, y: label.y - label.size, width: halfWidth * 2, height: label.size * 2)
+            let halfWidth = max(label.span / 2, label.size * 0.5 * Double(label.text.count)) + label.size
+            let halfHeight = label.angle == 0 ? label.size : halfWidth
+            let rect = MKMapRect(x: label.x - halfWidth, y: label.y - halfHeight, width: halfWidth * 2, height: halfHeight * 2)
             guard rect.intersects(mapRect) else { continue }
             drawLabel(label, context: context)
         }
-        // 7. Pions d'armées (taille fixe à l'écran)
-        let showAll = zoomScale > 1.0 / 32768
-        // Les tuiles sont dessinées en pixels (écran Retina) : on double la taille pour avoir de vrais points.
+        // 7. Forts, bases et usines (de près, taille fixe à l'écran)
         let unit = px * 2
-        // Taille des pions selon le zoom : petits vue du monde, pleins de près.
         let u = unit * MarkerScale.factor(Double(unit))
-        // 7a. Forts et bases (de près)
         if zoomScale > 1.0 / 16384 {
             for st in snap.structures {
                 let c = CGPoint(x: CGFloat(st.x) - 40 * u, y: CGFloat(st.y) + 22 * u)
@@ -658,11 +722,11 @@ final class ProvinceRenderer: MKOverlayRenderer {
         UIGraphicsPopContext()
     }
 
-    private func stroke(_ kinds: [BorderKind], _ kind: BorderKind, color: UIColor, width: CGFloat,
-                        area: MKMapRect, context: CGContext) {
+    private func stroke(_ kinds: [BorderKind], _ kind: BorderKind, among ids: [Int], level: Int?, color: UIColor,
+                        width: CGFloat, context: CGContext) {
         var any = false
-        for (i, b) in ProvinceMap.borders.enumerated() where kinds[i] == kind && b.bounds.intersects(area) {
-            context.addPath(b.path)
+        for i in ids where kinds[i] == kind {
+            context.addPath(MapDetail.borderPath(i, level: level))
             any = true
         }
         guard any else { return }
@@ -671,18 +735,19 @@ final class ProvinceRenderer: MKOverlayRenderer {
         context.strokePath()
     }
 
-    private func drawStripes(in province: Province, color: RGBA, spacing: CGFloat, width: CGFloat,
+    private func drawStripes(in id: Int, path: CGPath, color: RGBA, spacing: CGFloat, width: CGFloat,
                              rect: MKMapRect, context: CGContext) {
-        let box = province.bounds.intersection(rect)
+        let box = ProvinceMap.all[id].bounds.intersection(rect)
         guard !box.isNull, box.size.width > 0 else { return }
         context.saveGState()
-        context.addPath(province.path)
+        context.addPath(path)
         context.clip()
         context.setStrokeColor(color.cgColor)
         context.setLineWidth(width)
+        // Hachures calées sur une grille fixe (elles se raccordent d'une tuile à l'autre).
         let minX = CGFloat(box.minX), maxX = CGFloat(box.maxX), minY = CGFloat(box.minY), maxY = CGFloat(box.maxY)
         let height = maxY - minY
-        var x = minX - height
+        var x = floor((minX - height + maxY) / spacing) * spacing - maxY
         var count = 0
         while x < maxX && count < 2000 {
             context.move(to: CGPoint(x: x, y: maxY))
@@ -896,10 +961,10 @@ final class ProvinceRenderer: MKOverlayRenderer {
         let scale = CGFloat(label.size) / base
         let font: UIFont
         if label.isCountry {
-            let f = UIFont.systemFont(ofSize: base, weight: .bold)
-            font = f.fontDescriptor.withDesign(.serif).map { UIFont(descriptor: $0, size: base) } ?? f
+            // Capitales étroites et grasses : le style des grands jeux de stratégie modernes.
+            font = UIFont.systemFont(ofSize: base, weight: .heavy, width: .condensed)
         } else {
-            font = UIFont.italicSystemFont(ofSize: base)
+            font = UIFont.systemFont(ofSize: base, weight: .medium, width: .condensed)
         }
         let textColor: UIColor
         if label.isCountry {
@@ -914,6 +979,10 @@ final class ProvinceRenderer: MKOverlayRenderer {
             .strokeWidth: label.isCountry ? 9.0 : 4.0, .foregroundColor: UIColor.clear
         ]
         let fill: [NSAttributedString.Key: Any] = [.font: font, .kern: kern, .foregroundColor: textColor]
+        if label.isCountry && (label.span > 0 || label.text.count > 2) {
+            drawCurved(label, font: font, color: textColor, context: context)
+            return
+        }
         let text = label.text as NSString
         let size = text.size(withAttributes: fill)
         context.saveGState()
@@ -926,10 +995,53 @@ final class ProvinceRenderer: MKOverlayRenderer {
     }
 }
 
+extension ProvinceRenderer {
+    /// Nom de pays espacé, tourné selon l'allongement du territoire et légèrement courbé (lettre par lettre).
+    func drawCurved(_ label: MapLabel, font: UIFont, color: UIColor, context: CGContext) {
+        let base = font.pointSize
+        let letters = Array(label.text.uppercased())
+        let fill: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let outline: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.clear,
+                                                      .strokeColor: UIColor.black.withAlphaComponent(0.55), .strokeWidth: 7.0]
+        let widths = letters.map { (String($0) as NSString).size(withAttributes: fill).width }
+        let tracking = base * 0.30
+        let natural = widths.reduce(0, +) + tracking * CGFloat(max(0, letters.count - 1))
+        // Taille : celle prévue, sans dépasser la longueur du pays.
+        let wanted = label.span > 0 ? label.span * 0.8 : label.size * 0.62 * Double(max(3, letters.count)) * 1.15
+        let scale = min(CGFloat(label.size) / base, CGFloat(wanted) / max(1, natural))
+        let width = natural
+        let bend = CGFloat(label.bend) * width
+        context.saveGState()
+        context.translateBy(x: CGFloat(label.x), y: CGFloat(label.y))
+        context.rotate(by: CGFloat(label.angle))
+        context.scaleBy(x: scale, y: scale)
+        context.setAlpha(label.highlighted ? 0.95 : 0.72)
+        var x = -width / 2
+        for (i, ch) in letters.enumerated() {
+            let w = widths[i]
+            let cx = x + w / 2
+            let t = cx / max(1, width / 2)                     // -1 … 1
+            let y = -bend * (1 - t * t)                          // arche douce
+            let slope = 2 * bend * t / max(1, width / 2)         // pente de l'arche à cet endroit
+            context.saveGState()
+            context.translateBy(x: cx, y: y)
+            context.rotate(by: atan(slope))
+            let s = String(ch) as NSString
+            let h = font.lineHeight
+            let origin = CGPoint(x: -w / 2, y: -h / 2)
+            s.draw(at: origin, withAttributes: outline)
+            s.draw(at: origin, withAttributes: fill)
+            context.restoreGState()
+            x += w + tracking
+        }
+        context.restoreGState()
+    }
+}
+
 // MARK: - Coordinateur
 
 final class MapCoordinator: NSObject, MKMapViewDelegate {
-    let overlay = ProvinceOverlay()
+    var overlay = ProvinceOverlay()
     weak var mapView: MKMapView?
     var renderer: ProvinceRenderer?
     var onTap: ((MapTap) -> Void)?

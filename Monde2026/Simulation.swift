@@ -76,10 +76,135 @@ struct GameState: Codable {
     var covertAid: [CovertAid] = []                     // aides secrètes en cours
     var bombardments: [Int: Bombardment] = [:]          // régions sous les bombes
     var nextPlanID = 1
+    var fronts: [FrontOrder] = []                       // groupes d'armées affectés à une ligne de front
+    var nextFrontID = 1
+    var summits: [String: Int] = [:]
+    var templates: [CountryID: [DivisionType: DivisionTemplate]] = [:]   // modèles de division (soutiens)                    // dernier sommet entre deux pays (jour)
+    var reports: [BattleReport] = []                    // rapports après bataille (les plus récents)
+    var nextReportID = 1
+}
+
+/// Mémoire de calcul (ennemis, alliés, régions tenues, troupes par région), valable tant que ce dont elle
+/// dépend ne change pas. Ce sont les questions les plus posées par le moteur. Protégée par un verrou :
+/// la carte peut être calculée en arrière-plan pendant que l'interface interroge le même état.
+final class RelationCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var key: [Int] = []
+    private var enemies: [CountryID: Set<CountryID>] = [:]
+    private var allies: [CountryID: Set<CountryID>] = [:]
+    private var structural: [String: Double] = [:]
+    private var controlKey = -1
+    private var controlled: [CountryID: [Int]] = [:]
+    private var troopsKey = -1
+    private var troops: [Int: Int] = [:]
+    /// Mesure fine (autotest de performance seulement).
+    var profiling = false
+    var timings: [String: Double] = [:]
+
+    func reset() {
+        lock.lock()
+        key = []
+        enemies = [:]
+        allies = [:]
+        structural = [:]
+        lock.unlock()
+    }
+
+    private func camp(_ id: CountryID, key k: [Int], enemies wantEnemies: Bool, compute: () -> Set<CountryID>) -> Set<CountryID> {
+        lock.lock()
+        if k != key { key = k; enemies = [:]; allies = [:]; structural = [:] }
+        if let c = wantEnemies ? enemies[id] : allies[id] { lock.unlock(); return c }
+        lock.unlock()
+        let r = compute()
+        lock.lock()
+        if k == key { if wantEnemies { enemies[id] = r } else { allies[id] = r } }
+        lock.unlock()
+        return r
+    }
+
+    func enemies(_ id: CountryID, key k: [Int], compute: () -> Set<CountryID>) -> Set<CountryID> {
+        camp(id, key: k, enemies: true, compute: compute)
+    }
+
+    func allies(_ id: CountryID, key k: [Int], compute: () -> Set<CountryID>) -> Set<CountryID> {
+        camp(id, key: k, enemies: false, compute: compute)
+    }
+
+    /// Relation « structurelle » d'une paire de pays (traités, blocs, guerres, régimes).
+    func structural(_ pair: String, key k: [Int], compute: () -> Double) -> Double {
+        lock.lock()
+        if k != key { key = k; enemies = [:]; allies = [:]; structural = [:] }
+        if let v = structural[pair] { lock.unlock(); return v }
+        lock.unlock()
+        let r = compute()
+        lock.lock()
+        if k == key { structural[pair] = r }
+        lock.unlock()
+        return r
+    }
+
+    func controlled(key k: Int, compute: () -> [CountryID: [Int]]) -> [CountryID: [Int]] {
+        lock.lock()
+        if k == controlKey { let c = controlled; lock.unlock(); return c }
+        lock.unlock()
+        let r = compute()
+        lock.lock()
+        controlKey = k
+        controlled = r
+        lock.unlock()
+        return r
+    }
+
+    func troops(key k: Int, compute: () -> [Int: Int]) -> [Int: Int] {
+        lock.lock()
+        if k == troopsKey { let c = troops; lock.unlock(); return c }
+        lock.unlock()
+        let r = compute()
+        lock.lock()
+        troopsKey = k
+        troops = r
+        lock.unlock()
+        return r
+    }
 }
 
 struct Simulation {
     var state: GameState
+    /// Chaque calcul de jours a sa propre mémoire (jamais partagée entre deux fils d'exécution).
+    var relCache = RelationCache()
+
+    /// Mesure le temps d'une étape quand l'autotest le demande (sinon, simple appel).
+    mutating func timed(_ name: String, _ body: (inout Simulation) -> Void) {
+        guard relCache.profiling else { body(&self); return }
+        let t0 = Date()
+        body(&self)
+        relCache.timings[name, default: 0] += Date().timeIntervalSince(t0)
+    }
+
+    /// Empreinte de ce qui décide des camps.
+    func relationKey() -> [Int] {
+        var active = 0, sides = 0
+        for w in state.wars where w.isActive {
+            active += 1
+            sides += w.attackers.count * 31 + w.defenders.count
+        }
+        var members = 0
+        for b in state.blocs { members += b.members.count }
+        return [state.day, state.wars.count, active, sides, state.treaties.count, state.nextTreatyID, state.blocs.count, members,
+                state.claims.count]
+    }
+
+    /// Régions tenues par chaque pays (recalculé seulement quand une région change de mains).
+    func controlledMap() -> [CountryID: [Int]] {
+        var h = Hasher()
+        h.combine(state.control.count)
+        for (k, v) in state.control { h.combine(k &* 31 &+ v.hashValue) }
+        return relCache.controlled(key: h.finalize()) {
+            var out: [CountryID: [Int]] = [:]
+            for p in ProvinceMap.all { out[state.control[p.id] ?? p.country, default: []].append(p.id) }
+            return out
+        }
+    }
 
     // MARK: - Calendrier
 
@@ -164,6 +289,7 @@ struct Simulation {
         state.day += 1
         dailyMilitary()
         dailyArmies()
+        if state.day % 2 == 0 { manageFronts() }
         dailyTraining()
         dailyConstruction()
         syncDepots()
@@ -175,41 +301,82 @@ struct Simulation {
         }
     }
 
+    /// Même chose qu'`advanceDay`, en mesurant chaque étape (test de performance).
+    mutating func advanceDayProfiled(_ t: inout [String: Double]) {
+        func time(_ name: String, _ body: (inout Simulation) -> Void) {
+            let t0 = Date()
+            body(&self)
+            t[name, default: 0] += Date().timeIntervalSince(t0)
+        }
+        state.day += 1
+        time("militaire") { $0.dailyMilitary() }
+        time("armées") { $0.dailyArmies() }
+        if state.day % 2 == 0 { time("fronts") { $0.manageFronts() } }
+        time("entraînement") { $0.dailyTraining() }
+        time("chantiers") { $0.dailyConstruction() }
+        time("réserves") { $0.syncDepots() }
+        time("opérations") { $0.dailyOperations() }
+        time("guerre") { $0.dailyWar() }
+        time("nouvelles") { $0.scheduledNews() }
+        if Simulation.calendar.component(.day, from: currentDate) == 1 {
+            time("mois") { $0.monthlyTick(profile: &t) }
+        }
+    }
+
     mutating func advance(days: Int) {
         guard days > 0 else { return }
+        relCache = RelationCache()
         for _ in 0..<days {
             advanceDay()
         }
     }
 
     private mutating func monthlyTick() {
-        updateMarket()
-        for id in countryIDs {
-            monthlyEconomy(id)
-            monthlyPolitics(id)
-            monthlyResearch(id)
-            monthlyProjects(id)
+        var ignored: [String: Double] = [:]
+        monthlyTick(profile: &ignored)
+    }
+
+    private mutating func monthlyTick(profile t: inout [String: Double]) {
+        func time(_ name: String, _ body: (inout Simulation) -> Void) {
+            let t0 = Date()
+            body(&self)
+            t["m." + name, default: 0] += Date().timeIntervalSince(t0)
         }
-        monthlyDiplomacy()
-        for id in countryIDs {
-            if id == state.playerID {
-                let atWar = isAtWar(id)
-                if state.countries[id]?.autoProduction ?? false {
-                    state.countries[id]?.autoAllocateProduction(atWar: atWar)
-                }
-            } else {
-                runAI(id)
+        time("marché") { $0.updateMarket() }
+        time("pays") { sim in
+            for id in sim.countryIDs {
+                sim.monthlyEconomy(id)
+                sim.monthlyPolitics(id)
+                sim.monthlyResearch(id)
+                sim.monthlyProjects(id)
             }
-            recordSnapshot(id)
         }
-        monthlyEvents()
-        aiFortify()
-        aiIndustry()
-        refreshIndustryBonuses()
-        monthlyIntrigue()
-        aiNuclearDecisions()
-        monthlyGoals()
-        monthlyAchievements()
+        time("diplomatie") { $0.monthlyDiplomacy() }
+        time("ia") { sim in
+            for id in sim.countryIDs {
+                if id == sim.state.playerID {
+                    let atWar = sim.isAtWar(id)
+                    if sim.state.countries[id]?.autoProduction ?? false {
+                        sim.state.countries[id]?.autoAllocateProduction(atWar: atWar)
+                    }
+                } else {
+                    sim.runAI(id)
+                }
+                sim.recordSnapshot(id)
+            }
+        }
+        time("événements") { $0.monthlyEvents() }
+        time("forts") { $0.aiFortify() }
+        time("industrie") { sim in
+            sim.aiIndustry()
+            sim.refreshIndustryBonuses()
+        }
+        time("intrigues") { $0.monthlyIntrigue() }
+        time("nucléaire") { $0.aiNuclearDecisions() }
+        time("objectifs") { sim in
+            sim.monthlyGoals()
+            sim.monthlyAchievements()
+        }
     }
 
     mutating func recordSnapshot(_ id: CountryID) {
@@ -362,10 +529,12 @@ struct Simulation {
     @discardableResult
     mutating func recruit(_ type: DivisionType, count: Int, for id: CountryID, base: Int? = nil) -> Bool {
         guard count > 0, var c = state.countries[id] else { return false }
-        let men = Double(count) * type.stats.manpower
+        // Un modèle de division plus riche demande plus d'hommes et plus de temps.
+        let extra = 1 + template(id, type).effect.cost
+        let men = Double(count) * type.stats.manpower * extra
         guard men <= c.availableManpower else { return false }
         c.activePersonnel += men
-        let days = Int(Double(type.trainingDays) * (state.industryCache[id]?.training ?? 1))
+        let days = Int(Double(type.trainingDays) * (state.industryCache[id]?.training ?? 1) * extra)
         c.startTraining(type, count: count, days: max(10, days))
         if let b = base { c.training[c.training.count - 1].base = b }
         state.countries[id] = c

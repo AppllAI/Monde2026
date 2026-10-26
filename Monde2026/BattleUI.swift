@@ -14,6 +14,7 @@ import SwiftUI
 
 struct ArmyCard: View {
     @ObservedObject var store: GameStore
+    @State private var showOps = false
 
     var body: some View {
         if let sim = store.sim, let id = store.selectedArmy, let a = sim.state.armies.first(where: { $0.id == id }) {
@@ -39,7 +40,6 @@ struct ArmyCard: View {
                         let ids = [id] + store.armyGroup.sorted()
                         store.mutate { $0.setStance(stance, for: ids) }
                     }
-                    OperationsRow(store: store, army: a, sim: sim)
                     if !store.armyGroup.isEmpty {
                         HStack {
                             Label("\(store.armyGroup.count + 1) armées ensemble", systemImage: "square.stack.3d.up.fill")
@@ -49,42 +49,53 @@ struct ArmyCard: View {
                                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.paper)
                         }
                     }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
+                    // Les 4 ordres principaux, gros et clairs ; le reste est rangé dans « Plus ».
+                    let onFront = sim.front(of: id) != nil
+                    HStack(spacing: 8) {
+                        BigOrder(title: onFront ? "Quitter le front" : "Tenir le front", icon: "rectangle.split.3x1.fill",
+                                 tint: onFront ? Theme.steel : Theme.teal) {
+                            if onFront { store.leaveFront() } else { store.holdFront() }
+                        }
+                        BigOrder(title: "Offensive", icon: "arrow.up.right", tint: Theme.coral) {
+                            store.feedback = "Appui long sur la carte, puis tracez une flèche vers l'ennemi."
+                        }
+                        BigOrder(title: a.training ? "Entraînement…" : "Base", icon: "star.square.fill", tint: Theme.amber) {
+                            if a.training {
+                                store.mutate { $0.setTraining(false, for: [id]) }
+                            } else {
+                                store.perform { s, _ in s.sendToBase(id) }
+                            }
+                        }
+                        Menu {
                             if !a.path.isEmpty {
-                                QuietButton(title: "Arrêter", icon: "stop.fill") {
+                                Button("Arrêter", systemImage: "stop.fill") {
                                     let ids = [id] + store.armyGroup.sorted()
                                     store.mutate { s in for x in ids { s.stopArmy(x) } }
                                 }
                             }
-                            QuietButton(title: a.training ? "À l'entraînement" : "Base & entraînement",
-                                        icon: "star.square", tint: a.training ? Theme.amber : Theme.paper) {
-                                if a.training {
-                                    store.mutate { $0.setTraining(false, for: [id]) }
-                                } else {
-                                    store.perform { s, _ in s.sendToBase(id) }
-                                }
-                            }
-                            QuietButton(title: "Réorganiser", icon: "arrow.left.arrow.right", tint: Theme.amber) { store.open(.army(id)) }
-                            QuietButton(title: "Armées voisines", icon: "plus.circle") { store.groupNearby() }
-                            QuietButton(title: "Tout le front", icon: "rectangle.3.group") { store.groupFront() }
-                            QuietButton(title: "Diviser", icon: "square.split.2x1") {
-                                store.perform { s, _ in s.splitArmy(id) }
-                            }
+                            Button("Réorganiser les divisions", systemImage: "arrow.left.arrow.right") { store.open(.army(id)) }
+                            Button("Ajouter les armées voisines", systemImage: "plus.circle") { store.groupNearby() }
+                            Button("Sélectionner tout le front", systemImage: "rectangle.3.group") { store.groupFront() }
+                            Button("Diviser en deux", systemImage: "square.split.2x1") { store.perform { s, _ in s.splitArmy(id) } }
                             if sim.playerArmies(in: a.province).count > 1 {
-                                QuietButton(title: "Fusionner ici", icon: "square.stack.3d.up") {
-                                    store.perform { s, _ in s.mergeArmies(at: id) }
-                                }
+                                Button("Fusionner ici", systemImage: "square.stack.3d.up") { store.perform { s, _ in s.mergeArmies(at: id) } }
                             }
-                            QuietButton(title: "Dissoudre", icon: "xmark.bin", tint: Theme.coral) {
+                            Button("Opérations spéciales…", systemImage: "scope") { withAnimation(.snappy) { showOps.toggle() } }
+                            Divider()
+                            Button("Dissoudre", systemImage: "xmark.bin", role: .destructive) {
                                 store.mutate { $0.dissolveArmy(id) }
                                 store.clearSelection()
                             }
+                        } label: {
+                            BigOrderLabel(title: "Plus", icon: "ellipsis", tint: Theme.paper)
                         }
+                    }
+                    if showOps {
+                        OperationsRow(store: store, army: a, sim: sim)
                     }
                     Text(store.waypointMode
                          ? "Mode étapes : chaque région touchée s'ajoute au trajet."
-                         : "Faites glisser le pion jusqu'à une région — contre une frontière pour la tenir. Ou touchez une région. ✋ à gauche : trajet par étapes.")
+                         : "Glissez le pion vers une région (contre une frontière pour la tenir). Appui long + trait : offensive. Double-tap : tout le front.")
                         .font(.system(size: 11)).foregroundStyle(store.waypointMode ? Theme.amber : Theme.steel).lineLimit(2)
                 } else {
                     GeneralRow(general: a.general)
@@ -132,6 +143,36 @@ struct ArmyCard: View {
     }
 }
 
+/// Gros bouton d'ordre (fiche d'armée) : facile à toucher du pouce.
+struct BigOrder: View {
+    let title: String
+    let icon: String
+    var tint: Color = Theme.amber
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) { BigOrderLabel(title: title, icon: icon, tint: tint) }
+            .buttonStyle(Pressable())
+    }
+}
+
+struct BigOrderLabel: View {
+    let title: String
+    let icon: String
+    var tint: Color = Theme.amber
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 17, weight: .semibold))
+            Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .foregroundStyle(tint)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .background(tint.opacity(0.13), in: HUDShape(cut: 8))
+        .overlay(HUDShape(cut: 8).strokeBorder(tint.opacity(0.25)))
+    }
+}
+
 /// Bandeau compact d'une bataille : qui attaque qui, et où en est la prise.
 struct BattleStrip: View {
     let battle: Battle
@@ -152,7 +193,7 @@ struct BattleStrip: View {
             Meter(value: battle.captureProgress, tint: side == -1 ? Theme.coral : Theme.teal, height: 6)
         }
         .padding(10)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.white.opacity(0.06), in: HUDShape(cut: 7))
     }
 }
 
@@ -162,16 +203,14 @@ struct UnitSymbol: View {
     var color: Color = Theme.amber
     var size: CGFloat = 34
 
+    /// Le même pictogramme que sur les pions de la carte (casque, char, blindé, parachute, ancre).
     var body: some View {
-        Canvas { ctx, sz in
-            let r = CGRect(x: 1, y: sz.height * 0.15, width: sz.width - 2, height: sz.height * 0.7)
-            ctx.fill(Path(roundedRect: r, cornerRadius: 3), with: .color(color.opacity(0.9)))
-            ctx.stroke(Path(roundedRect: r, cornerRadius: 3), with: .color(.white), lineWidth: 1.5)
-            for p in UnitGlyph.paths(type, in: r) {
-                ctx.stroke(p, with: .color(.white), lineWidth: 1.6)
-            }
-        }
-        .frame(width: size, height: size)
+        UnitIcons.image(type).resizable().scaledToFit()
+            .foregroundStyle(Theme.paper)
+            .padding(size * 0.16)
+            .frame(width: size * 1.25, height: size * 0.9)
+            .background(HUDShape(cut: size * 0.2, radius: 2).fill(color.opacity(0.75)))
+            .overlay(HUDShape(cut: size * 0.2, radius: 2).strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
     }
 }
 
@@ -222,7 +261,7 @@ struct GeneralRow: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.ink)
                 .frame(width: 32, height: 32)
-                .background(Theme.amber, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .background(Theme.amber, in: HUDShape(cut: 5))
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(general.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
@@ -248,11 +287,12 @@ struct Gauge2: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(Fmt.pct(value, 0)).font(Theme.data(13, weight: .semibold)).foregroundStyle(tint)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(label.uppercased()).font(Theme.label(10)).tracking(0.6).foregroundStyle(Theme.steel).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+                Text(Fmt.pct(value, 0)).font(Theme.data(13, weight: .bold)).foregroundStyle(tint)
             }
-            Meter(value: value, tint: tint, height: 5)
-            Text(label).font(.system(size: 10)).foregroundStyle(Theme.steel).lineLimit(1).minimumScaleFactor(0.8)
+            SegmentBar(value: value, tint: tint, segments: 10, height: 6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -271,7 +311,7 @@ struct CompositionRow: View {
                 }
                 .foregroundStyle(Theme.paper)
                 .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(Color.white.opacity(0.07), in: Capsule())
+                .background(HUDShape(cut: 5, radius: 2).fill(Color.white.opacity(0.07)))
             }
         }
     }
@@ -296,7 +336,7 @@ struct StancePicker: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .foregroundStyle(current == s ? Theme.ink : Theme.paper)
                     .background(current == s ? tint(s) : Color.white.opacity(0.07),
-                                in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                                in: HUDShape(cut: 7))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Posture \(s.name)")
@@ -395,15 +435,30 @@ struct BattlePanel: View {
             Text(explanation(b)).font(.system(size: 12)).foregroundStyle(Theme.steel)
         }
         .padding(14)
-        .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        // 2. Les deux camps face à face
-        HStack(alignment: .top, spacing: 10) {
-            SideCard(title: "Attaque", id: b.attacker, name: sim.name(b.attacker), general: b.attackerGeneral,
-                     divisions: b.attackerDivisions, org: b.attackerOrg, losses: b.attackerLosses,
-                     power: b.attack, isPlayer: side == 1, tactic: b.attackerTactic)
-            SideCard(title: "Défense", id: b.defender, name: sim.name(b.defender), general: b.defenderGeneral,
-                     divisions: b.defenderDivisions, org: b.defenderOrg, losses: b.defenderLosses,
-                     power: b.defense, isPlayer: side == -1, tactic: b.defenderTactic)
+        .background(Theme.deep.opacity(0.75), in: HUDShape(cut: 10))
+        // 2. L'arène : les deux camps face à face, le duel des tactiques, la corde du rapport de force
+        let forces = sim.battleForces(b)
+        BattleArena(battle: b, attack: forces.attack, defense: forces.defense, side: side,
+                    attackerName: sim.name(b.attacker), defenderName: sim.name(b.defender))
+        // 2b. Pourquoi, en 3 images
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ce qui pèse le plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
+            WhyStrip(factors: b.decisiveFactors(), side: side)
+        }
+        // 2c. La tactique de la prochaine phase (si c'est nous qui menons ce camp)
+        if let options = playerTactics(sim, b, side: side), !options.isEmpty {
+            let opponent = side == 1 ? b.defenderTactic : b.attackerTactic
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Votre tactique (prochaine phase dans \(b.daysLeftInPhase) j)")
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.paper)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    ForEach(options) { t in
+                        TacticChoice(tactic: t, selected: b.playerPick == t, beatsCurrent: t.beats.contains(opponent)) {
+                            store.perform { s, _ in s.pickTactic(t, at: province) }
+                        }
+                    }
+                }
+            }
         }
         // 3. Ce que le joueur peut faire
         if side != 0 {
@@ -423,13 +478,13 @@ struct BattlePanel: View {
         // 4. Le détail, pour qui veut comprendre
         Button { withAnimation(.snappy) { details.toggle() } } label: {
             HStack {
-                Text("Pourquoi ce rapport de force ?").font(.system(size: 13, weight: .semibold))
+                Text("Tout le détail des calculs").font(.system(size: 13, weight: .semibold))
                 Spacer()
                 Image(systemName: details ? "chevron.up" : "chevron.down")
             }
             .foregroundStyle(Theme.paper)
             .padding(12)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Color.white.opacity(0.05), in: HUDShape(cut: 7))
         }
         .buttonStyle(.plain)
         if details {
@@ -445,6 +500,21 @@ struct BattlePanel: View {
                 }
             }
         }
+    }
+
+    /// Tactiques que le joueur peut choisir (seulement s'il mène l'attaque ou la défense).
+    private func playerTactics(_ sim: Simulation, _ b: Battle, side: Int) -> [Tactic]? {
+        guard let p = sim.state.playerID else { return nil }
+        if side == 1 && b.attacker == p {
+            let armies = sim.state.armies.filter { $0.side == p && $0.engaged && $0.path.first == province }
+            let fronts = Set(armies.map { $0.province }).count
+            return sim.availableTactics(attacking: true, armies: armies, owner: p, province: province, fronts: fronts)
+        }
+        if side == -1 && b.defender == p {
+            let armies = sim.state.armies.filter { $0.province == province && $0.side == p }
+            return sim.availableTactics(attacking: false, armies: armies, owner: p, province: province, fronts: b.fronts.count)
+        }
+        return nil
     }
 
     private func explanation(_ b: Battle) -> String {
@@ -558,8 +628,8 @@ struct SideCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(isPlayer ? Theme.amber.opacity(0.6) : Color.clear))
+        .background(Theme.deep.opacity(0.75), in: HUDShape(cut: 8))
+        .overlay(HUDShape(cut: 8).strokeBorder(isPlayer ? Theme.amber.opacity(0.6) : Color.clear))
     }
 }
 
@@ -579,8 +649,8 @@ struct TacticTile: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(highlight ? 0.12 : 0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(highlight ? Theme.amber : Color.clear))
+        .background(Color.white.opacity(highlight ? 0.12 : 0.05), in: HUDShape(cut: 7))
+        .overlay(HUDShape(cut: 7).strokeBorder(highlight ? Theme.amber : Color.clear))
     }
 }
 
@@ -614,8 +684,8 @@ struct TacticChoice: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
-            .background(selected ? Theme.amber : Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .background(selected ? Theme.amber : Color.white.opacity(0.06), in: HUDShape(cut: 7))
+            .overlay(HUDShape(cut: 7)
                 .strokeBorder(beatsCurrent && !selected ? Theme.amber.opacity(0.7) : Color.clear, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
@@ -644,7 +714,7 @@ struct ModifierList: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Theme.deep.opacity(0.75), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Theme.deep.opacity(0.75), in: HUDShape(cut: 8))
     }
 
     private func percent(_ v: Double) -> String {
@@ -699,7 +769,7 @@ struct BattleRow: View {
             .clipShape(Capsule())
         }
         .padding(10)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.white.opacity(0.05), in: HUDShape(cut: 7))
     }
 }
 

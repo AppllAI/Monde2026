@@ -10,21 +10,26 @@ import UIKit
 // =============================================================
 
 enum Theme {
-    static let ink = Color(red: 0.043, green: 0.086, blue: 0.133)        // #0B1622
-    static let deep = Color(red: 0.067, green: 0.125, blue: 0.188)       // #112030
-    static let steel = Color(red: 0.56, green: 0.64, blue: 0.72)         // #8FA3B8
-    static let paper = Color(red: 0.93, green: 0.94, blue: 0.95)
-    static let amber = Color(red: 0.95, green: 0.71, blue: 0.27)         // #F2B544 — le joueur
-    static let coral = Color(red: 0.90, green: 0.33, blue: 0.29)         // #E5534B — la guerre
-    static let teal = Color(red: 0.23, green: 0.72, blue: 0.65)          // #3BB8A6 — les alliés
-    static let sky = Color(red: 0.42, green: 0.66, blue: 0.95)
+    // Identité « centre de commandement » : fonds bleu nuit profonds, accents vifs et lisibles.
+    static let ink = Color(red: 0.035, green: 0.055, blue: 0.09)        // #090E17 — fond
+    static let deep = Color(red: 0.075, green: 0.11, blue: 0.165)       // #131C2A — panneaux
+    static let raised = Color(red: 0.11, green: 0.155, blue: 0.225)     // #1C283A — cartes en relief
+    static let steel = Color(red: 0.55, green: 0.63, blue: 0.72)        // texte secondaire
+    static let paper = Color(red: 0.94, green: 0.96, blue: 0.98)        // texte
+    static let amber = Color(red: 1.0, green: 0.71, blue: 0.28)         // #FFB547 — le joueur
+    static let coral = Color(red: 1.0, green: 0.35, blue: 0.31)         // #FF5A4F — la guerre
+    static let teal = Color(red: 0.19, green: 0.84, blue: 0.65)         // #30D6A6 — les alliés
+    static let sky = Color(red: 0.31, green: 0.70, blue: 1.0)           // #4FB3FF — information
+    static let violet = Color(red: 0.62, green: 0.48, blue: 1.0)        // recherche, espionnage
 
     static let line = Color.white.opacity(0.10)
+    static let edge = Color(red: 0.45, green: 0.70, blue: 1.0).opacity(0.22)   // liseré des panneaux
 
-    // Typographie
-    static func title(_ size: CGFloat) -> Font { .system(size: size, weight: .semibold, design: .serif) }
+    // Typographie : titres en capitales étroites et grasses (style jeu de stratégie), chiffres à chasse fixe.
+    static func title(_ size: CGFloat) -> Font { .system(size: size, weight: .heavy).width(.condensed) }
+    static func label(_ size: CGFloat = 11) -> Font { .system(size: size, weight: .bold).width(.condensed) }
     static func data(_ size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        .system(size: size, weight: weight, design: .default).monospacedDigit()
+        .system(size: size, weight: weight, design: .rounded).monospacedDigit()
     }
     static let body = Font.system(size: 15)
     static let small = Font.system(size: 12)
@@ -69,6 +74,11 @@ enum Theme {
     ]
 
     static func politicalColor(_ id: CountryID) -> UIColor {
+        if let c = palette[id] { return c }
+        return baseColor(id)
+    }
+
+    private static func baseColor(_ id: CountryID) -> UIColor {
         if let v = iconic[id] { return hex(v) }
         var hash: UInt32 = 2166136261
         for scalar in id.unicodeScalars {
@@ -79,6 +89,56 @@ enum Theme {
         let bri = 0.62 + CGFloat((hash >> 17) % 18) / 100
         return UIColor(hue: hue, saturation: sat, brightness: bri, alpha: 1)
     }
+
+    /// Palette finale : chaque pays garde sa couleur « historique », sauf si un voisin a presque la même
+    /// (Ukraine et Roumanie, par exemple) ; le plus petit des deux change alors légèrement de teinte.
+    private static let palette: [CountryID: UIColor] = {
+        var area: [CountryID: Double] = [:]
+        var neighbors: [CountryID: Set<CountryID>] = [:]
+        let provinces = ProvinceMap.all
+        for p in provinces {
+            area[p.country, default: 0] += p.weight
+            for n in p.neighbors where provinces[n].country != p.country {
+                neighbors[p.country, default: []].insert(provinces[n].country)
+            }
+        }
+        func rgb(_ c: UIColor) -> (CGFloat, CGFloat, CGFloat) {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            c.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return (r, g, b)
+        }
+        func distance(_ a: UIColor, _ b: UIColor) -> CGFloat {
+            let x = rgb(a), y = rgb(b)
+            let dr = x.0 - y.0, dg = x.1 - y.1, db = x.2 - y.2
+            return (2 * dr * dr + 4 * dg * dg + 3 * db * db).squareRoot() / 3
+        }
+        var out: [CountryID: UIColor] = [:]
+        for id in area.keys.sorted(by: { (area[$0] ?? 0, $0) > (area[$1] ?? 0, $1) }) {
+            let base = baseColor(id)
+            let near = (neighbors[id] ?? []).compactMap { out[$0] }
+            func score(_ c: UIColor) -> CGFloat { near.map { distance(c, $0) }.min() ?? 1 }
+            if score(base) >= 0.13 {
+                out[id] = base
+                continue
+            }
+            var h: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0, a: CGFloat = 0
+            base.getHue(&h, saturation: &sat, brightness: &bri, alpha: &a)
+            var best = base
+            var bestScore = score(base)
+            search: for shift in [0.07, -0.07, 0.14, -0.14, 0.22, -0.22, 0.33, -0.33, 0.5] as [CGFloat] {
+                for dBri in [0, -0.12, 0.1] as [CGFloat] {
+                    var hue = (h + shift).truncatingRemainder(dividingBy: 1)
+                    if hue < 0 { hue += 1 }
+                    let c = UIColor(hue: hue, saturation: sat, brightness: min(0.9, max(0.4, bri + dBri)), alpha: 1)
+                    let sc = score(c)
+                    if sc > bestScore { best = c; bestScore = sc }
+                    if sc >= 0.13 { break search }
+                }
+            }
+            out[id] = best
+        }
+        return out
+    }()
 
     /// −100 → corail, 0 → acier, +100 → sarcelle.
     static func relationColor(_ value: Double) -> Color {
