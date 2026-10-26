@@ -203,16 +203,14 @@ struct UnitSymbol: View {
     var color: Color = Theme.amber
     var size: CGFloat = 34
 
+    /// Le même pictogramme que sur les pions de la carte (casque, char, blindé, parachute, ancre).
     var body: some View {
-        Canvas { ctx, sz in
-            let r = CGRect(x: 1, y: sz.height * 0.15, width: sz.width - 2, height: sz.height * 0.7)
-            ctx.fill(Path(roundedRect: r, cornerRadius: 3), with: .color(color.opacity(0.9)))
-            ctx.stroke(Path(roundedRect: r, cornerRadius: 3), with: .color(.white), lineWidth: 1.5)
-            for p in UnitGlyph.paths(type, in: r) {
-                ctx.stroke(p, with: .color(.white), lineWidth: 1.6)
-            }
-        }
-        .frame(width: size, height: size)
+        UnitIcons.image(type).resizable().scaledToFit()
+            .foregroundStyle(Theme.paper)
+            .padding(size * 0.16)
+            .frame(width: size * 1.25, height: size * 0.9)
+            .background(HUDShape(cut: size * 0.2, radius: 2).fill(color.opacity(0.75)))
+            .overlay(HUDShape(cut: size * 0.2, radius: 2).strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
     }
 }
 
@@ -289,11 +287,12 @@ struct Gauge2: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(Fmt.pct(value, 0)).font(Theme.data(13, weight: .semibold)).foregroundStyle(tint)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(label.uppercased()).font(Theme.label(10)).tracking(0.6).foregroundStyle(Theme.steel).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+                Text(Fmt.pct(value, 0)).font(Theme.data(13, weight: .bold)).foregroundStyle(tint)
             }
-            Meter(value: value, tint: tint, height: 5)
-            Text(label).font(.system(size: 10)).foregroundStyle(Theme.steel).lineLimit(1).minimumScaleFactor(0.8)
+            SegmentBar(value: value, tint: tint, segments: 10, height: 6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -312,7 +311,7 @@ struct CompositionRow: View {
                 }
                 .foregroundStyle(Theme.paper)
                 .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(Color.white.opacity(0.07), in: Capsule())
+                .background(HUDShape(cut: 5, radius: 2).fill(Color.white.opacity(0.07)))
             }
         }
     }
