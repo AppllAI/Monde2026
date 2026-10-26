@@ -203,6 +203,10 @@ extension Simulation {
 
     /// Alliés militaires : traités d'alliance + membres des mêmes blocs militaires.
     func allies(of id: CountryID) -> Set<CountryID> {
+        relCache.allies(id, key: relationKey()) { computeAllies(of: id) }
+    }
+
+    private func computeAllies(of id: CountryID) -> Set<CountryID> {
         var result = Set(partners(of: id, .alliance))
         for b in blocs(of: id) where b.isMilitary {
             result.formUnion(b.members)
@@ -533,6 +537,7 @@ extension Simulation {
         settleProvinces(between: war.attackers, and: war.defenders, keep: terms == .statusQuo)
         for id in war.attackers + war.defenders {
             state.countries[id]?.capitulated = false
+            relCache.reset()
         }
         if let a = war.attackers.first, let d = war.defenders.first {
             changeRelation(a, d, by: 25)

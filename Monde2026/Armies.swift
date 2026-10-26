@@ -155,11 +155,7 @@ extension Simulation {
     }
 
     func provincesControlled(by id: CountryID) -> [Int] {
-        var result: [Int] = []
-        for p in ProvinceMap.all where controller(of: p.id) == id {
-            result.append(p.id)
-        }
-        return result
+        controlledMap()[id] ?? []
     }
 
     /// La plus grande région contrôlée par le pays (sa « capitale » militaire).
@@ -623,8 +619,16 @@ extension Simulation {
             if !state.battles.isEmpty { state.battles = [:] }
             return
         }
-        let ownersWithArmies = Set(state.armies.map { $0.owner })
-        for id in ownersWithArmies { normalizeArmies(id) }
+        // Seuls les pays qui ont perdu des divisions ont des armées à corriger (un seul passage pour tous).
+        var assigned: [CountryID: [DivisionType: Int]] = [:]
+        for a in state.armies {
+            for (t, n) in a.divisions { assigned[a.owner, default: [:]][t, default: 0] += n }
+        }
+        for (id, counts) in assigned {
+            guard let c = state.countries[id] else { normalizeArmies(id); continue }
+            if counts.contains(where: { $0.value > (c.divisions[$0.key] ?? 0) }) { normalizeArmies(id) }
+        }
+        if state.armies.contains(where: { $0.count == 0 }) { state.armies.removeAll { $0.count == 0 } }
         if state.day % 2 == 0 { updateSupply() }
         if state.day % 3 == 0 { aiArmies() }
 
@@ -883,6 +887,8 @@ extension Simulation {
         case .defensive: threshold = 1.9
         }
         var frontierCache: [CountryID: (Set<Int>, Int)] = [:]
+        var armiesAt: [Int: [Int]] = [:]
+        for (k, a) in state.armies.enumerated() { armiesAt[a.province, default: []].append(k) }
         let mine = state.armies.indices.filter { state.armies[$0].owner == id && state.armies[$0].path.isEmpty }
         var occupiedFront = Set(state.armies.filter { $0.owner == id }.map { $0.province })
         for i in mine {
@@ -925,8 +931,8 @@ extension Simulation {
                 }
                 let (dFront, dCount) = frontierCache[defender] ?? ([], 1)
                 var def = garrisonDefense(defender, at: n, frontier: dFront, controlledCount: dCount)
-                for d in state.armies where d.province == n && isFriendly(defender, d.owner) {
-                    def += armyDefense(d, vsHardness: a.hardness)
+                for k in armiesAt[n] ?? [] where isFriendly(defender, state.armies[k].owner) {
+                    def += armyDefense(state.armies[k], vsHardness: a.hardness)
                 }
                 if ProvinceMap.all[n].country == defender { def *= 1.25 }
                 // Les armées amies voisines de la même cible attaquent avec nous (dans la limite du front).
@@ -1002,10 +1008,18 @@ extension Simulation {
             return
         }
         if let f = a.facing, enemyNeighbors.contains(f) { return }
-        let best = enemyNeighbors.max { x, y in
-            state.armies.filter { $0.province == x }.reduce(0) { $0 + $1.count } < state.armies.filter { $0.province == y }.reduce(0) { $0 + $1.count }
-        }
+        let troops = troopsByProvince()
+        let best = enemyNeighbors.max { x, y in (troops[x] ?? 0) < (troops[y] ?? 0) }
         state.armies[i].facing = best
+    }
+
+    /// Divisions présentes dans chaque région (mémorisé pour la journée).
+    func troopsByProvince() -> [Int: Int] {
+        relCache.troops(key: state.day) {
+            var out: [Int: Int] = [:]
+            for a in state.armies { out[a.province, default: 0] += a.count }
+            return out
+        }
     }
 
     private func nearestEnemyProvince(from province: Int, owner: CountryID) -> Int? {

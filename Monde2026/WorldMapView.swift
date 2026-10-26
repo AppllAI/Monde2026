@@ -308,18 +308,18 @@ enum MapSnapshotBuilder {
             var span = 0.0
             if major / minor > 1.25 && best.count > 1 {
                 // On garde un sens de lecture confortable.
-                angle = max(-0.9, min(0.9, angle))
+                angle = max(-0.6, min(0.6, angle))
                 span = major * 3.0
                 let n = Double(max(3, name.count))
                 // Taille pour que le nom, espacé, couvre environ les trois quarts de la longueur.
                 let fit = span * 0.78 / (0.62 * n + 0.3 * (n - 1))
-                size = max(size, min(fit, minor * 1.6, size * 2.2))
+                size = max(size, min(fit, minor * 1.2, size * 1.5))
             } else {
                 angle = 0
             }
             labels.append(MapLabel(id: "c-" + owner, text: name, x: x, y: y, size: size, isCountry: true,
                                    highlighted: owner == player || owner == selected,
-                                   angle: angle, span: span, bend: span > 0 ? 0.07 : 0))
+                                   angle: angle, span: span, bend: span > 0 ? 0.035 : 0))
         }
         // Noms des régions (visibles seulement de près)
         for p in provinces where p.weight > 2000 {
@@ -600,6 +600,7 @@ final class ProvinceRenderer: MKOverlayRenderer {
                 context.saveGState()
                 context.addPath(shape(i))
                 context.clip()
+                context.setAlpha(0.55)
                 // Motif calé sur une grille fixe : il se raccorde parfaitement d'une tuile à l'autre.
                 let x0 = floor(b.minX / Double(tile)) * Double(tile), y0 = floor(b.minY / Double(tile)) * Double(tile)
                 context.draw(image, in: CGRect(x: x0, y: y0, width: Double(tile), height: Double(tile)), byTiling: true)
@@ -1014,7 +1015,7 @@ extension ProvinceRenderer {
         context.translateBy(x: CGFloat(label.x), y: CGFloat(label.y))
         context.rotate(by: CGFloat(label.angle))
         context.scaleBy(x: scale, y: scale)
-        context.setAlpha(label.highlighted ? 1 : 0.86)
+        context.setAlpha(label.highlighted ? 0.95 : 0.72)
         var x = -width / 2
         for (i, ch) in letters.enumerated() {
             let w = widths[i]
